@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 <div className="h-screen flex bg-slate-50 overflow-hidden text-slate-900">
                     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                         <Topbar role={role} />
-                        <main className="flex-1 bg-slate-100/40 overflow-y-auto scrollbar-hide p-4 lg:p-6">
+                        <main className="flex-1 bg-slate-100/40 overflow-y-auto p-4 lg:p-6">
                             {children}
                         </main>
                     </div>

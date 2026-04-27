@@ -31,6 +31,21 @@
 }
 
 @layer utilities {
+  /* Thin styled scrollbar for main content area */
+  main::-webkit-scrollbar {
+    width: 6px;
+  }
+  main::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  main::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+  main::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
