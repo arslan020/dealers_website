@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import toast from 'react-hot-toast';
 import { AddVehicleButton } from '@/components/vehicles/AddVehicleButton';
 
 interface VehicleItem {
@@ -233,6 +234,23 @@ function VehiclesContent() {
         setFilterFuel(''); setFilterBodyType(''); setFilterTransmission([]);
     };
 
+    const [importing, setImporting] = useState(false);
+    async function handleImportFromAT() {
+        if (!confirm('Import all vehicles from AutoTrader into the database? Existing vehicles (same VRM) will be updated.')) return;
+        setImporting(true);
+        try {
+            const res = await fetch('/api/vehicles/import-from-at', { method: 'POST' });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error);
+            toast.success(`Imported ${data.imported} new, updated ${data.updated} vehicles from AutoTrader.`);
+            fetchVehicles();
+        } catch (err: any) {
+            toast.error(err.message || 'Import failed');
+        } finally {
+            setImporting(false);
+        }
+    }
+
     const downloadCSV = () => {
         const target = selectedIds.size > 0 ? filteredVehicles.filter(v => selectedIds.has(v._id)) : filteredVehicles;
         const headers = ['VRM', 'Make', 'Model', 'Derivative', 'Status', 'Price', 'Mileage'];
@@ -316,6 +334,14 @@ function VehiclesContent() {
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
                         Add Vehicle
                     </AddVehicleButton>
+                    <button
+                        onClick={handleImportFromAT}
+                        disabled={importing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-blue-500 text-blue-600 rounded-lg text-[12px] font-semibold hover:bg-blue-50 transition-colors disabled:opacity-50"
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                        {importing ? 'Importing…' : 'Import from AT'}
+                    </button>
                     <button className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-teal-500 text-teal-600 rounded-lg text-[12px] font-semibold hover:bg-teal-50 transition-colors">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         Locations
