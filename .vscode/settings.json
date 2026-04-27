@@ -1,0 +1,6 @@
+{
+  "css.lint.unknownAtRules": "ignore",
+  "tailwindCSS.experimental.classRegex": [
+    ["nexus-([a-zA-Z0-9-]+)", "([^'\"]+)"]
+  ]
+}

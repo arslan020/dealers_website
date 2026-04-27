@@ -1,0 +1,11 @@
+﻿.next/dev/types/validator.ts(279,31): error TS2344: Type 'typeof import("C:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/crm/customers/[id]/deals/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/crm/customers/[id]/deals">'.
+  Types of property 'GET' are incompatible.
+    Type '(req: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ ok: boolean; deals: { dealId: any; advertiserDealStatus: any; stock: { stockId: any; searchId: any; }; financeApplication: { ...; } | null; partExchange: { ...; } | null; buyingSignals: { ...; } | null; }[]; customer: any; }> | Ne...' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+src/app/api/vehicles/autotrader-stock/[id]/advertise/route.ts(36,39): error TS2345: Argument of type '(req: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ ok: boolean; result: any; }> | NextResponse<{ ok: boolean; error: any; }>>' is not assignable to parameter of type '(req: NextRequest, context: ApiContext) => Promise<NextResponse<unknown>>'.
+  Types of parameters '__1' and 'context' are incompatible.
+    Type 'ApiContext' is not assignable to type '{ params: { id: string; }; }'.
+      Property 'params' is optional in type 'ApiContext' but required in type '{ params: { id: string; }; }'.

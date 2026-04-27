@@ -1,0 +1,863 @@
+import { NextRequest, NextResponse } from 'next/server';
+import connectToDatabase from '@/lib/db';
+import Vehicle from '@/models/Vehicle';
+import { withErrorHandler } from '@/lib/api-handler';
+import { AutoTraderClient } from '@/lib/autotrader';
+import mongoose from 'mongoose';
+
+import AutoTraderStockCache from '@/models/AutoTraderStockCache';
+
+async function getVehicles(req: NextRequest) {
+    const tenantId = req.headers.get('x-tenant-id');
+    if (!tenantId) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await connectToDatabase();
+
+    const { searchParams } = new URL(req.url);
+    const status = searchParams.get('status');
+    const normalizedStatus = status === 'For Sale' ? 'In Stock' : status;
+    const search = searchParams.get('search')?.toLowerCase();
+
+    // 1. Fetch Local Vehicles (filtered for display)
+    const query: any = { tenantId };
+    if (normalizedStatus && normalizedStatus !== 'All') {
+        query.status = normalizedStatus;
+    }
+    if (search) {
+        query.$or = [
+            { make: { $regex: search, $options: 'i' } },
+            { vehicleModel: { $regex: search, $options: 'i' } },
+            { vrm: { $regex: search, $options: 'i' } },
+        ];
+    }
+    const localVehicles = await Vehicle.find(query).lean();
+
+    // 1b. Also fetch ALL local vehicles (no status filter) for AT merge lookup.
+    //     This lets us block AT-cache rows from appearing when the local record
+    //     has been explicitly moved to a different status (e.g. Draft).
+    const allLocalVehicles = (normalizedStatus && normalizedStatus !== 'All')
+        ? await Vehicle.find({ tenantId }, { _id: 1, vrm: 1, stockId: 1, status: 1 }).lean()
+        : localVehicles;
+
+    // 2. Fetch AutoTrader Cache
+    let atVehicles: any[] = [];
+    try {
+        const cache = await AutoTraderStockCache.findOne({ tenantId });
+        if (cache?.stock) {
+            atVehicles = cache.stock.map((v: any) => ({
+                ...v,
+                createdAt: v.createdAt || cache.fetchedAt?.toISOString() || null,
+                updatedAt: v.updatedAt || cache.fetchedAt?.toISOString() || null,
+            }));
+        }
+    } catch (err) {
+        console.error('[Unified API] AT Cache Error:', err);
+    }
+
+    // 3. Merge Strategy
+    // Build two lookup maps: VRM -> local vehicle, and stockId -> local vehicle
+    // (from the FILTERED set — used to enrich mergedList items)
+    const localByVrm = new Map();    // VRM (uppercase) -> local vehicle
+    const localByStockId = new Map(); // stockId -> local vehicle
+    localVehicles.forEach((v: any) => {
+        if (v.vrm && v.vrm !== 'PENDING') localByVrm.set(v.vrm.toUpperCase(), v);
+        if (v.stockId) localByStockId.set(v.stockId, v);
+    });
+
+    // Lookup maps from ALL local vehicles — used to block AT-only rows that have
+    // a local record with a different status (e.g. vehicle moved to Draft).
+    const allLocalByVrm = new Map();
+    const allLocalByStockId = new Map();
+    allLocalVehicles.forEach((v: any) => {
+        if (v.vrm && v.vrm !== 'PENDING') allLocalByVrm.set(v.vrm.toUpperCase(), v);
+        if (v.stockId) allLocalByStockId.set(v.stockId, v);
+    });
+
+    // Start merged list with local vehicles that are NOT just stale shadow copies
+    // (shadow copy = has stockId but vrm is 'PENDING' or make is 'Unknown')
+    const mergedList: any[] = localVehicles
+        .filter((v: any) => {
+            // Keep if has real VRM and real make (not a broken shadow copy)
+            if (v.stockId && (v.vrm === 'PENDING' || v.make === 'Unknown')) return false;
+            return true;
+        })
+        .map((v: any) => ({
+            ...v,
+            source: 'local',
+            isLiveOnAT: false,
+            websitePublished: v.websitePublished || false,
+            atStatus: v.atAdvertStatus === 'PUBLISHED' ? 'Yes' : 'No'
+        }));
+
+    // Add AT vehicles, merging if local copy exists (by VRM first, then stockId)
+    atVehicles.forEach(atv => {
+        const vrm = atv.vrm?.toUpperCase();
+        // Try match by VRM first, then fall back to stockId
+        const existing = localByVrm.get(vrm) || localByStockId.get(atv.id);
+
+        // Determine AT Status from AT data
+        let atStatus = 'No';
+        const isATPublished = atv.adverts?.retailAdverts?.autotraderAdvert?.status === 'PUBLISHED';
+        const isProfilePublished = atv.adverts?.retailAdverts?.profileAdvert?.status === 'PUBLISHED';
+
+        if (isATPublished) atStatus = 'Yes';
+        else if (isProfilePublished) atStatus = 'Profile Only';
+
+        if (existing) {
+            // Merge: find by VRM or stockId in the list
+            const index = mergedList.findIndex(m =>
+                (vrm && m.vrm?.toUpperCase() === vrm) ||
+                (m.stockId && m.stockId === atv.id)
+            );
+            if (index !== -1) {
+                const local = mergedList[index];
+                // Prefer local DB images over AT cache — AT cache may be stale/empty after an edit
+                const hasSavedImages = local.primaryImage && local.primaryImage !== '';
+                mergedList[index] = {
+                    ...local,
+                    stockId: atv.id,
+                    // Heal stale 'Unknown' make/model from AT data
+                    make: local.make === 'Unknown' ? atv.make : local.make,
+                    model: local.model === 'Unknown' ? atv.model : local.model,
+                    vrm: local.vrm === 'PENDING' ? atv.vrm : local.vrm,
+                    // Only use AT images if local DB has no saved images
+                    primaryImage: hasSavedImages ? local.primaryImage : atv.primaryImage,
+                    imagesCount: hasSavedImages ? (local.imagesCount || 0) : (atv.images?.length || 0),
+                    isLiveOnAT: isATPublished,
+                    atStatus,
+                    atData: atv,
+                    source: 'merged'
+                };
+            }
+        } else {
+            // This AT vehicle has no match in the FILTERED local set.
+            // Check the FULL local set — if there's a local record with a different
+            // status (e.g. Draft/Sold/Reserved), do NOT add it as an AT-only row.
+            // This prevents a Draft vehicle from reappearing in the "In Stock" tab.
+            const localRecordAny = allLocalByVrm.get(vrm) || allLocalByStockId.get(atv.id);
+            if (localRecordAny) {
+                // A local record exists but its status doesn't match the current filter — skip.
+                // (If the filter is 'All', this branch is never reached because allLocal === localVehicles.)
+            } else {
+                // Pure AT-only vehicle (no local record at all) — use status from AT cache.
+                const atVehicleStatus = atv.status || 'In Stock'; // set correctly by autotrader-stock route
+
+                // Skip if a specific status filter is active and this vehicle doesn't match.
+                if (normalizedStatus && normalizedStatus !== 'All' && normalizedStatus !== atVehicleStatus) {
+                    // e.g. Sold filter: skip In Stock AT-only vehicles; Draft filter: skip In Stock, etc.
+                } else {
+                    const matchesSearch = !search ||
+                        atv.make?.toLowerCase().includes(search) ||
+                        atv.model?.toLowerCase().includes(search) ||
+                        atv.vrm?.toLowerCase().includes(search);
+
+                    if (matchesSearch) {
+                        mergedList.push({
+                            _id: `at-${atv.id}`,
+                            make: atv.make,
+                            model: atv.model,
+                            derivative: atv.derivative,
+                            vrm: atv.vrm,
+                            price: atv.price,
+                            status: atVehicleStatus,
+                            primaryImage: atv.primaryImage,
+                            imagesCount: atv.images?.length || 0,
+                            videosCount: 0,
+                            createdAt: atv.createdAt || null,
+                            updatedAt: atv.updatedAt || null,
+                            source: 'autotrader',
+                            stockId: atv.id,
+                            isLiveOnAT: isATPublished,
+                            atStatus,
+                            websitePublished: false,
+                            atData: atv
+                        });
+                    }
+                }
+            }
+        }
+    });
+
+    // Sort by createdAt ascending — stable sort that is not affected by edits (which change updatedAt)
+    mergedList.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return dateB - dateA; // newest first (matches typical dealer expectation)
+    });
+
+    // Apply status filter one more time on merged output so AT-only rows
+    // cannot leak into a filtered result (e.g. Sold filter showing In Stock rows).
+    const statusFiltered = normalizedStatus && normalizedStatus !== 'All'
+        ? mergedList.filter((v: any) => v.status === normalizedStatus)
+        : mergedList;
+
+    return NextResponse.json({ ok: true, vehicles: statusFiltered });
+}
+
+
+function buildAtStockPayload(vehicle: any, mongoId: string) {
+    const featuresPayload = Array.isArray(vehicle.features) && vehicle.features.length > 0
+        ? vehicle.features.map((f: any) => (typeof f === 'string' ? { name: f } : f))
+        : undefined;
+
+    // engineSize stored as CC string from lookup (e.g. "1998"). Treat values >100 as CC, <=100 as litres.
+    const engineSizeNum = vehicle.engineSize ? Number(vehicle.engineSize) : undefined;
+
+    return {
+        vehicle: {
+            make: vehicle.make,
+            model: vehicle.model,
+            vehicleType: vehicle.vehicleType || 'Car',
+            ...(vehicle.vrm                && { registration: vehicle.vrm.toUpperCase() }),
+            ...(vehicle.vin                && { vin: vehicle.vin }),
+            ...(vehicle.derivativeId       && { derivativeId: vehicle.derivativeId }),
+            ...(vehicle.mileage !== undefined && { odometerReadingMiles: Number(vehicle.mileage) }),
+            ...(vehicle.colour             && { colour: vehicle.colour }),
+            ...(vehicle.fuelType           && { fuelType: vehicle.fuelType }),
+            ...(vehicle.transmission       && { transmissionType: vehicle.transmission }),
+            ...(vehicle.bodyType           && { bodyType: vehicle.bodyType }),
+            ...(vehicle.year               && { yearOfManufacture: String(vehicle.year) }),
+            ...(vehicle.generation         && { generation: vehicle.generation }),
+            ...(vehicle.trim               && { trim: vehicle.trim }),
+            ...(vehicle.doors              && { doors: Number(vehicle.doors) }),
+            ...(vehicle.seats              && { seats: Number(vehicle.seats) }),
+            ...(vehicle.drivetrain         && { drivetrain: vehicle.drivetrain }),
+            ...(vehicle.driverPosition     && { steeringPosition: vehicle.driverPosition }),
+            ...(vehicle.dateOfRegistration && { dateOfRegistration: vehicle.dateOfRegistration }),
+            ...(engineSizeNum && engineSizeNum > 100
+                ? { engineCapacityCC: engineSizeNum }
+                : engineSizeNum
+                ? { badgeEngineSizeLitres: engineSizeNum }
+                : {}),
+        },
+        adverts: {
+            retailAdverts: {
+                suppliedPrice: { amountGBP: Number(vehicle.price) || 0 },
+                ...(vehicle.forecourtPrice && { forecourtPrice: { amountGBP: Number(vehicle.forecourtPrice) } }),
+                ...(vehicle.description    && { description: vehicle.description }),
+                ...(vehicle.attentionGrabber && { attentionGrabber: vehicle.attentionGrabber }),
+            },
+        },
+        ...(featuresPayload && { features: featuresPayload }),
+        metadata: {
+            lifecycleState: 'FORECOURT',
+            externalStockId: mongoId,
+        },
+    };
+}
+
+async function createVehicle(req: NextRequest) {
+    const tenantId = req.headers.get('x-tenant-id');
+    if (!tenantId) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    await connectToDatabase();
+
+    // Normalise serviceHistory — AutoTrader may return short values like 'Full', 'Part', 'None'
+    if (body.serviceHistory) {
+        const sh = String(body.serviceHistory).toLowerCase().trim();
+        const serviceHistoryMap: Record<string, string> = {
+            'full service history':       'Full service history',
+            'full dealership history':    'Full dealership history',
+            'full dealer history':        'Full dealership history',
+            'dealer history':             'Full dealership history',
+            'full':                       'Full service history',
+            'part service history':       'Part service history',
+            'partial service history':    'Part service history',
+            'part':                       'Part service history',
+            'no service history':         'No service history',
+            'no history':                 'No service history',
+            'none':                       'No service history',
+        };
+        body.serviceHistory = serviceHistoryMap[sh] ?? undefined;
+    }
+
+    const vehicle = await Vehicle.create({
+        ...body,
+        status: body.status || 'Draft', // Always default to Draft — user must explicitly publish
+        tenantId,
+    });
+
+    // ─── Skip AutoTrader push for Draft vehicles ──────────────────────────────
+    if (vehicle.status === 'Draft') {
+        console.log('[AutoTrader] Skipping AT push — vehicle is Draft');
+        return NextResponse.json({ ok: true, vehicle });
+    }
+
+    // ─── Push to AutoTrader for non-Draft vehicles ────────────────────────────
+    try {
+        if (!vehicle.derivativeId) {
+            console.warn('[AutoTrader] Missing derivativeId, skipping stock creation.');
+            return NextResponse.json({ ok: true, vehicle, warning: 'Vehicle created locally but AutoTrader sync requires a derivativeId.' });
+        }
+
+        const client = new AutoTraderClient(tenantId);
+        await client.init();
+
+        const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString());
+        const atResult = await client.createStock(atPayload);
+        if (atResult?.metadata?.stockId) {
+            const stockId = atResult.metadata.stockId;
+            vehicle.stockId = stockId;
+            vehicle.externalStockId = vehicle._id.toString();
+            await vehicle.save();
+            console.log(`[AutoTrader] Created stock ${stockId} for vehicle ${vehicle._id}`);
+        }
+    } catch (atError: any) {
+        if (atError.status === 409 || atError.data?.message?.includes('stock item already exists')) {
+            console.log('[AutoTrader] Conflict detected, sync will link stockId.');
+        } else {
+            console.error('[AutoTrader createStock Error]', atError);
+        }
+    }
+
+    return NextResponse.json({ ok: true, vehicle });
+}
+
+async function updateVehicle(req: NextRequest) {
+    const tenantId = req.headers.get('x-tenant-id');
+    if (!tenantId) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { id, ...updateData } = body;
+
+    if (!id) {
+        return NextResponse.json({ ok: false, error: 'Vehicle ID required' }, { status: 400 });
+    }
+
+    await connectToDatabase();
+
+    let vehicle;
+    if (id.startsWith('at-')) {
+        const atId = id.replace('at-', '');
+
+        // Pull real vehicle data from AT stock cache so we never store 'Unknown'/'PENDING'
+        let cachedStock: any = null;
+        try {
+            const cacheDoc = await AutoTraderStockCache.findOne({ tenantId });
+            if (cacheDoc?.stock) {
+                cachedStock = cacheDoc.stock.find((s: any) => s.id === atId);
+            }
+        } catch {}
+
+        // Use findOneAndUpdate with upsert — atomically find or create.
+        // This prevents race conditions where two concurrent requests both
+        // see no existing record and both try to create one (duplicate bug).
+        vehicle = await Vehicle.findOneAndUpdate(
+            { stockId: atId, tenantId },       // filter
+            { $setOnInsert: {                  // only set these on INSERT, not update
+                stockId: atId,
+                tenantId,
+                websitePublished: false,
+                make: cachedStock?.make || cachedStock?.vehicle?.make || 'Unknown',
+                model: cachedStock?.model || cachedStock?.vehicle?.model || 'Unknown',
+                vrm: cachedStock?.vrm || cachedStock?.vehicle?.registration || 'PENDING',
+                price: cachedStock?.price || cachedStock?.adverts?.retailAdverts?.suppliedPrice?.amountGBP || 0,
+                colour: cachedStock?.vehicle?.colour || '',
+                fuelType: cachedStock?.vehicle?.fuelType || '',
+                transmission: cachedStock?.vehicle?.transmissionType || '',
+                bodyType: cachedStock?.vehicle?.bodyType || '',
+                derivative: cachedStock?.derivative || '',
+                year: cachedStock?.vehicle?.yearOfManufacture || '',
+                mileage: cachedStock?.vehicle?.odometerReadingMiles || 0,
+            }},
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        // ── Build a safe $set — only update image fields if explicitly saving images ──
+        // Strip image-related fields unless this is explicitly an image save (imageIds in payload).
+        // This prevents ANY non-image tab save from ever wiping uploaded images or videos.
+        const IMAGE_FIELDS = ['images', 'imageIds', 'primaryImage', 'imagesCount', 'imageMetadata'];
+        const VIDEO_FIELDS = ['youtubeVideoIds'];
+
+        const safeSet: Record<string, any> = {};
+        for (const [k, v] of Object.entries(updateData)) {
+            // Block image fields unless imageIds is explicitly provided
+            if (IMAGE_FIELDS.includes(k) && updateData.imageIds === undefined) continue;
+            // Block video fields unless youtubeVideoIds is explicitly provided
+            if (VIDEO_FIELDS.includes(k) && updateData.youtubeVideoIds === undefined) continue;
+            safeSet[k] = v;
+        }
+
+        // Use $set so MongoDB only touches the keys in safeSet — everything else is preserved
+        vehicle = await Vehicle.findOneAndUpdate(
+            { stockId: atId, tenantId },
+            { $set: safeSet },
+            { new: true }
+        );
+
+        if (!vehicle) {
+            // Vehicle not yet in local DB — create it from AT cache data
+            vehicle = await Vehicle.findOneAndUpdate(
+                { stockId: atId, tenantId },
+                { $setOnInsert: {
+                    stockId: atId,
+                    tenantId,
+                    websitePublished: false,
+                    make: cachedStock?.make || cachedStock?.vehicle?.make || 'Unknown',
+                    model: cachedStock?.model || cachedStock?.vehicle?.model || 'Unknown',
+                    vrm: cachedStock?.vrm || cachedStock?.vehicle?.registration || 'PENDING',
+                    price: cachedStock?.price || cachedStock?.adverts?.retailAdverts?.suppliedPrice?.amountGBP || 0,
+                    colour: cachedStock?.vehicle?.colour || '',
+                    fuelType: cachedStock?.vehicle?.fuelType || '',
+                    transmission: cachedStock?.vehicle?.transmissionType || '',
+                    bodyType: cachedStock?.vehicle?.bodyType || '',
+                    derivative: cachedStock?.derivative || '',
+                    year: cachedStock?.vehicle?.yearOfManufacture || '',
+                    mileage: cachedStock?.vehicle?.odometerReadingMiles || 0,
+                    ...safeSet,
+                }},
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        }
+    } else {
+        // Standard local vehicle update — use $set so ONLY specified fields change
+        const IMAGE_FIELDS = ['images', 'imageIds', 'primaryImage', 'imagesCount', 'imageMetadata'];
+        const VIDEO_FIELDS = ['youtubeVideoIds'];
+
+        const safeSet: Record<string, any> = {};
+        for (const [k, v] of Object.entries(updateData)) {
+            if (IMAGE_FIELDS.includes(k) && updateData.imageIds === undefined) continue;
+            if (VIDEO_FIELDS.includes(k) && updateData.youtubeVideoIds === undefined) continue;
+            safeSet[k] = v;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            vehicle = await Vehicle.findOneAndUpdate(
+                { stockId: id, tenantId },
+                { $set: safeSet },
+                { new: true }
+            );
+        } else {
+            vehicle = await Vehicle.findOneAndUpdate(
+                { _id: id, tenantId },
+                { $set: safeSet },
+                { new: true }
+            );
+        }
+    }
+
+
+    if (!vehicle) {
+        return NextResponse.json({ ok: false, error: 'Vehicle not found' }, { status: 404 });
+    }
+
+    // ─── Sync with AutoTrader / Updates ──────────────────────────────────────
+    const client = new AutoTraderClient(tenantId);
+    await client.init();
+    
+    // 1. Advert Channel Statuses
+    const advertFields = [
+        { key: 'atAdvertStatus', channel: 'autotrader' },
+        { key: 'advertiserAdvertStatus', channel: 'advertiser' },
+        { key: 'locatorAdvertStatus', channel: 'locator' },
+        { key: 'exportAdvertStatus', channel: 'export' },
+        { key: 'profileAdvertStatus', channel: 'profile' },
+    ] as const;
+
+    for (const field of advertFields) {
+        if (updateData[field.key] && vehicle.stockId) {
+            try {
+                await client.updateStockAdvertiseStatus(vehicle.stockId, field.channel, updateData[field.key]);
+                console.log(`[AutoTrader] ${field.channel} status updated to ${updateData[field.key]}`);
+            } catch (e) {
+                console.error(`[AutoTrader] Failed to update ${field.channel} status:`, e);
+            }
+        }
+    }
+
+    // 2. Sync Price (£75 minimum enforced)
+    if (vehicle.stockId && (updateData.price !== undefined || updateData.forecourtPrice !== undefined)) {
+        const retailAdverts: Record<string, any> = {};
+
+        if (updateData.price !== undefined) {
+            if (Number(updateData.price) < 75) {
+                console.warn('[AutoTrader] Supplied price too low (£75 min), skipping AT sync');
+            } else {
+                retailAdverts.suppliedPrice = { amountGBP: Number(updateData.price) };
+            }
+        }
+
+        if (updateData.forecourtPrice !== undefined && Number(updateData.forecourtPrice) > 0) {
+            retailAdverts.forecourtPrice = { amountGBP: Number(updateData.forecourtPrice) };
+        }
+
+        if (Object.keys(retailAdverts).length > 0) {
+            try {
+                await client.updateStock(vehicle.stockId, { adverts: { retailAdverts } });
+                console.log('[AutoTrader] Price synced:', retailAdverts);
+            } catch (atError) {
+                console.error('[AutoTrader Price Sync Error]', atError);
+            }
+        }
+    }
+
+    // 3. Sync Lifecycle State (with mandatory Unpublish for SOLD/WASTEBIN/DELETED/DRAFT)
+    if (vehicle.stockId && updateData.status) {
+        const lifecycleMap: Record<string, string> = {
+            'Sold':             'SOLD',
+            'In Stock':         'FORECOURT',
+            'Due In':           'DUE_IN',
+            'Sale In Progress': 'SALE_IN_PROGRESS',
+            'Reserved':         'SALE_IN_PROGRESS', // Reserved on AutoDesk = Sale In Progress on AT
+            'Wastebin':         'WASTEBIN',
+            'Deleted':          'DELETED',
+            'Draft':            'LOCAL_DRAFT',      // Special case: just unpublish
+        };
+        const lifecycleState = lifecycleMap[updateData.status];
+        if (lifecycleState) {
+            try {
+                if (lifecycleState === 'LOCAL_DRAFT') {
+                    // For Draft, we don't send a fake lifecycleState to AT, we just take down the adverts
+                    await client.unpublishAll(vehicle.stockId);
+                    console.log(`[AutoTrader] Vehicle moved to Draft. Unpublished all channels for stock ${vehicle.stockId}`);
+                } else {
+                    // SOLD, WASTEBIN, DELETED all require channels unpublished first
+                    if (['SOLD', 'WASTEBIN', 'DELETED'].includes(lifecycleState)) {
+                        await client.unpublishAll(vehicle.stockId);
+                        console.log(`[AutoTrader] Prerequisite: All channels unpublished for stock ${vehicle.stockId}`);
+                    }
+
+                    await client.updateStock(vehicle.stockId, {
+                        metadata: { lifecycleState }
+                    });
+                    console.log(`[AutoTrader] Lifecycle updated to ${lifecycleState}`);
+
+                    // Ensure "In Stock" vehicles become live again on AutoTrader
+                    // after being moved from Draft/Sold/Reserved states.
+                    if (lifecycleState === 'FORECOURT') {
+                        await client.updateStockAdvertiseStatus(vehicle.stockId, 'autotrader', 'PUBLISHED');
+                        await Vehicle.updateOne(
+                            { _id: vehicle._id, tenantId },
+                            { $set: { atAdvertStatus: 'PUBLISHED' } }
+                        );
+                        console.log(`[AutoTrader] Autotrader advert published for stock ${vehicle.stockId}`);
+                    }
+                }
+            } catch (atError) {
+                console.error('[AutoTrader Lifecycle Sync Error]', atError);
+            }
+        }
+    }
+
+    // 4. Create missing AT stock if vehicle was explicitly changed to 'In Stock'
+    if (!vehicle.stockId && updateData.status === 'In Stock') {
+        console.log(`[AutoTrader] Vehicle ${vehicle._id} changing to 'In Stock' but has no AT stockId. Pushing to AT now.`);
+        if (!vehicle.derivativeId) {
+            console.warn('[AutoTrader] Missing derivativeId, skipping stock creation.');
+        } else {
+            try {
+                const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString());
+                const atResult = await client.createStock(atPayload);
+                if (atResult?.metadata?.stockId) {
+                    const stockId = atResult.metadata.stockId;
+                    vehicle.stockId = stockId;
+                    vehicle.externalStockId = vehicle._id.toString();
+                    await vehicle.save();
+                    console.log(`[AutoTrader] Created stock ${stockId} for vehicle ${vehicle._id}`);
+                }
+            } catch (atError: any) {
+                if (atError.status === 409 || atError.data?.message?.includes('stock item already exists')) {
+                    console.log('[AutoTrader] Conflict detected during Draft->In Stock sync, AT stock already exists.');
+                } else {
+                    console.error('[AutoTrader createStock Error]', atError);
+                }
+            }
+        }
+    }
+
+    // 4. Sync vehicle fields (colour, mileage, fuelType, transmission, bodyType)
+    if (vehicle.stockId) {
+        const vehicleFieldMap: Record<string, string> = {
+            colour:       'colour',
+            mileage:      'odometerReadingMiles',
+            fuelType:     'fuelType',
+            transmission: 'transmissionType',
+            bodyType:     'bodyType',
+            // Note: make, model, derivative, generation are read-only on AT — derived from derivativeId
+            // Only these direct vehicle fields are safely patchable per AT docs
+            year:         'yearOfManufacture',
+            vin:          'vin',
+            doors:        'doors',
+            seats:        'seats',
+        };
+
+        const vehicleUpdate: Record<string, any> = {};
+        for (const [localKey, atKey] of Object.entries(vehicleFieldMap)) {
+            if (updateData[localKey] !== undefined) {
+                vehicleUpdate[atKey] = localKey === 'mileage'
+                    ? Number(updateData[localKey])
+                    : localKey === 'year'
+                    ? String(updateData[localKey])
+                    : updateData[localKey];
+            }
+        }
+
+        if (Object.keys(vehicleUpdate).length > 0) {
+            try {
+                await client.updateStock(vehicle.stockId, { vehicle: vehicleUpdate });
+                console.log('[AutoTrader] Vehicle fields synced:', Object.keys(vehicleUpdate));
+            } catch (atError) {
+                console.error('[AutoTrader Vehicle Field Sync Error]', atError);
+            }
+        }
+    }
+
+    // 5. Sync advert content (description, description2, attentionGrabber)
+    if (vehicle.stockId) {
+        const advertUpdate: Record<string, any> = {};
+        if (updateData.description !== undefined) advertUpdate.description = updateData.description;
+        if (updateData.description2 !== undefined) advertUpdate.description2 = updateData.description2;
+        if (updateData.attentionGrabber !== undefined) advertUpdate.attentionGrabber = updateData.attentionGrabber;
+
+        if (Object.keys(advertUpdate).length > 0) {
+            try {
+                await client.updateStock(vehicle.stockId, { adverts: { retailAdverts: advertUpdate } });
+                console.log('[AutoTrader] Advert content synced');
+            } catch (atError) {
+                console.error('[AutoTrader Advert Sync Error]', atError);
+            }
+        }
+    }
+
+    // 6. Sync features list (full replacement as per AT docs)
+    if (vehicle.stockId && updateData.features !== undefined) {
+        try {
+            const featuresPayload = Array.isArray(updateData.features)
+                ? updateData.features.map((f: any) => (typeof f === 'string' ? { name: f } : f))
+                : [];
+            await client.updateStock(vehicle.stockId, { features: featuresPayload });
+            console.log(`[AutoTrader] Features synced: ${featuresPayload.length} items`);
+        } catch (atError) {
+            console.error('[AutoTrader Features Sync Error]', atError);
+        }
+    }
+
+    // 7. Sync media images (full imageId list replacement)
+    // Only sync real AT imageIds — filter out fallback 'img-N' placeholder IDs
+    const realImageIds = (updateData.imageIds as string[] || []).filter(
+        (id: string) => id && !id.startsWith('img-')
+    );
+    if (updateData.imageIds !== undefined && realImageIds.length > 0) {
+        const atApiUrl = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
+        const cdnHost = atApiUrl.includes('sandbox') ? 'm-qa.atcdn.co.uk' : 'm.atcdn.co.uk';
+        const cdnUrls = realImageIds.map((imageId: string) => `https://${cdnHost}/a/media/{resize}/${imageId}.jpg`);
+
+        // ── Always persist imageIds/images/primaryImage locally ───────────────
+        // This ensures images survive page refresh even for vehicles without stockId
+        try {
+            await Vehicle.findOneAndUpdate(
+                { _id: vehicle._id, tenantId },
+                { $set: {
+                    imageIds: realImageIds,
+                    images: cdnUrls,
+                    primaryImage: cdnUrls[0] || (vehicle.primaryImage as string) || '',
+                    imagesCount: realImageIds.length,
+                }},
+                { new: false }
+            );
+            console.log(`[Local DB] imageIds/images persisted: ${realImageIds.length} images`);
+        } catch (dbErr) {
+            console.error('[Local DB Images Persist Error]', dbErr);
+        }
+
+        // ── Also sync to AutoTrader if this vehicle is linked ─────────────────
+        if (vehicle.stockId) {
+            try {
+                const imagesPayload = realImageIds.map((imageId: string) => ({ imageId }));
+                await client.updateStock(vehicle.stockId, { media: { images: imagesPayload } });
+                console.log(`[AutoTrader] Images synced: ${imagesPayload.length} images`);
+            } catch (atError) {
+                console.error('[AutoTrader Images Sync Error]', atError);
+            }
+        }
+    }
+
+    // 8. Update local AutoTraderStockCache immediately to prevent stale data on refresh
+    if (vehicle.stockId) {
+        try {
+            const cacheDoc = await AutoTraderStockCache.findOne({ tenantId });
+            if (cacheDoc && cacheDoc.stock) {
+                const stockIndex = cacheDoc.stock.findIndex((s: any) => s.id === vehicle.stockId);
+                if (stockIndex !== -1) {
+                    const stockItem = cacheDoc.stock[stockIndex];
+                    
+                    if (updateData.price !== undefined) stockItem.price = Number(updateData.price);
+                    if (updateData.vrm !== undefined) stockItem.vrm = updateData.vrm;
+                    if (updateData.make !== undefined) stockItem.make = updateData.make;
+                    if (updateData.model !== undefined) stockItem.model = updateData.model;
+                    if (updateData.derivative !== undefined) stockItem.derivative = updateData.derivative;
+                    if (updateData.mileage !== undefined) stockItem.mileage = Number(updateData.mileage);
+                    if (updateData.colour !== undefined) stockItem.colour = updateData.colour;
+                    if (updateData.fuelType !== undefined) stockItem.fuelType = updateData.fuelType;
+                    if (updateData.transmission !== undefined) stockItem.transmission = updateData.transmission;
+                    if (updateData.bodyType !== undefined) stockItem.bodyType = updateData.bodyType;
+
+                    stockItem.vehicle = stockItem.vehicle || {};
+                    if (updateData.colour !== undefined) stockItem.vehicle.colour = updateData.colour;
+                    if (updateData.mileage !== undefined) stockItem.vehicle.odometerReadingMiles = Number(updateData.mileage);
+                    if (updateData.fuelType !== undefined) stockItem.vehicle.fuelType = updateData.fuelType;
+                    if (updateData.transmission !== undefined) stockItem.vehicle.transmissionType = updateData.transmission;
+                    if (updateData.bodyType !== undefined) stockItem.vehicle.bodyType = updateData.bodyType;
+                    if (updateData.year !== undefined) stockItem.vehicle.yearOfManufacture = String(updateData.year);
+
+                    stockItem.adverts = stockItem.adverts || {};
+                    stockItem.adverts.retailAdverts = stockItem.adverts.retailAdverts || {};
+                    if (updateData.price !== undefined) {
+                        stockItem.adverts.retailAdverts.suppliedPrice = { amountGBP: Number(updateData.price) };
+                    }
+                    if (updateData.description !== undefined) stockItem.adverts.retailAdverts.description = updateData.description;
+                    if (updateData.description2 !== undefined) stockItem.adverts.retailAdverts.description2 = updateData.description2;
+                    if (updateData.attentionGrabber !== undefined) stockItem.adverts.retailAdverts.attentionGrabber = updateData.attentionGrabber;
+
+                    // ── Sync media images so reload shows updated images ──────────
+                    // Only update cache with real AT imageIds — skip fallback img-N IDs
+                    const cacheImageIds = (updateData.imageIds as string[] || []).filter(
+                        (id: string) => id && !id.startsWith('img-')
+                    );
+                    if (updateData.imageIds !== undefined && cacheImageIds.length > 0) {
+                        // Build a lookup of existing imageId → href from current cache
+                        // This preserves the original CDN hostname (sandbox m-qa vs production m)
+                        const existingHrefs: Record<string, string> = {};
+                        const existingImages = stockItem.media?.images || stockItem.images || [];
+                        for (const img of existingImages) {
+                            if (typeof img === 'string') {
+                                // Plain URL — extract imageId from filename
+                                const match = img.match(/\/([a-f0-9]{32})(?:\.jpg)?/i);
+                                if (match) existingHrefs[match[1]] = img.includes('{resize}') ? img : img.replace(/\/w\d+h\d+\//, '/{resize}/');
+                            } else if (img?.imageId && img?.href) {
+                                existingHrefs[img.imageId] = img.href;
+                            }
+                        }
+
+                        // For new images not in the existing map, construct URL with correct CDN
+                        const atApiUrl = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
+                        const cdnHost = atApiUrl.includes('sandbox') ? 'm-qa.atcdn.co.uk' : 'm.atcdn.co.uk';
+
+                        stockItem.media = stockItem.media || {};
+                        stockItem.media.images = cacheImageIds.map((imageId: string) => ({
+                            imageId,
+                            href: existingHrefs[imageId] || `https://${cdnHost}/a/media/{resize}/${imageId}.jpg`,
+                        }));
+                        console.log(`[AutoTrader Cache] Updated media.images: ${cacheImageIds.length} real images`);
+                    }
+
+                    // Use updateOne + $set instead of .save() to avoid VersionError
+                    // when concurrent PATCH requests both try to save the same cache doc
+                    await AutoTraderStockCache.updateOne(
+                        { tenantId },
+                        { $set: { stock: cacheDoc.stock } }
+                    );
+                    console.log(`[AutoTrader Cache] Instantly updated cache for stock ${vehicle.stockId}`);
+                }
+            }
+        } catch (cacheErr) {
+            console.error('[AutoTrader Cache Instant Update Error]', cacheErr);
+        }
+    }
+
+    return NextResponse.json({ ok: true, vehicle });
+}
+
+async function deleteVehicle(req: NextRequest) {
+    const tenantId = req.headers.get('x-tenant-id');
+    if (!tenantId) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+        return NextResponse.json({ ok: false, error: 'Vehicle ID required' }, { status: 400 });
+    }
+
+    await connectToDatabase();
+
+    let stockIdToDelete = null;
+    let localIdToDelete = null;
+
+    if (id.startsWith('at-')) {
+        stockIdToDelete = id.replace('at-', '');
+        // Also check if we have a local record for this stockId
+        const localRec = await Vehicle.findOne({ stockId: stockIdToDelete, tenantId });
+        if (localRec) localIdToDelete = localRec._id;
+    } else {
+        const vehicle = await Vehicle.findOne({ _id: id, tenantId });
+        if (vehicle) {
+            localIdToDelete = vehicle._id;
+            stockIdToDelete = vehicle.stockId;
+        }
+    }
+
+    // ─── Sync Delete with AutoTrader if linked ─────────────────────────────────
+    // AT Connect API docs: You MUST unpublish all channels FIRST, then set
+    // lifecycleState to 'DELETED' via PATCH. There is no HTTP DELETE on /stock/.
+    if (stockIdToDelete) {
+        try {
+            const client = new AutoTraderClient(tenantId);
+            await client.init();
+
+            // Step 1: Unpublish all advert channels (mandatory prerequisite per AT docs)
+            try {
+                await client.unpublishAll(stockIdToDelete);
+                console.log(`[AutoTrader Sync] Unpublished all channels for stock ${stockIdToDelete}`);
+            } catch (unpublishError: any) {
+                // 404 means stock doesn't exist on AT — safe to continue with local delete
+                if (unpublishError?.status === 404 || unpublishError?.message?.includes('404')) {
+                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT — skipping unpublish`);
+                } else {
+                    throw unpublishError;
+                }
+            }
+
+            // Step 2: Set lifecycleState to DELETED via PATCH (correct AT API method)
+            try {
+                await client.updateLifecycleState(stockIdToDelete, 'DELETED');
+                console.log(`[AutoTrader Sync] lifecycleState set to DELETED for stock ${stockIdToDelete}`);
+            } catch (deleteError: any) {
+                if (deleteError?.status === 404 || deleteError?.message?.includes('404')) {
+                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT — already deleted`);
+                } else {
+                    throw deleteError;
+                }
+            }
+
+        } catch (atError: any) {
+            // Non-fatal: log and continue — local delete should always succeed
+            console.error('[AutoTrader Sync Delete Error]', atError.message || atError);
+        }
+    }
+
+    if (localIdToDelete) {
+        await Vehicle.deleteOne({ _id: localIdToDelete, tenantId });
+    }
+
+    // ─── Remove from AT Cache so it won't reappear on page refresh ────────────
+    // The cache is the source for the vehicles list page merge. If we don't
+    // remove it here, the deleted vehicle will reappear until the next SYNC.
+    if (stockIdToDelete) {
+        try {
+            await AutoTraderStockCache.updateOne(
+                { tenantId },
+                { $pull: { stock: { id: stockIdToDelete } } }
+            );
+            console.log(`[Cache] Removed stock ${stockIdToDelete} from AT cache`);
+        } catch (cacheErr: any) {
+            console.warn('[Cache] Failed to remove from AT cache:', cacheErr.message);
+        }
+    }
+
+    return NextResponse.json({ ok: true });
+}
+
+export const GET = withErrorHandler(getVehicles);
+export const POST = withErrorHandler(createVehicle);
+export const PATCH = withErrorHandler(updateVehicle);
+export const DELETE = withErrorHandler(deleteVehicle);

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/comments\")",
+      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/comments/[commentId]\")",
+      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/timecards\")",
+      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/timecards/[cardId]\")"
+    ]
+  }
+}
