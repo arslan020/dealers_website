@@ -35,8 +35,6 @@ interface VehicleItem {
     atAdvertStatus?: 'PUBLISHED' | 'NOT_PUBLISHED';
 }
 
-const ALL_STATUSES = ['Draft', 'For Sale', 'Reserved', 'Sold', 'Complete', 'Deleted'];
-
 function StatusBadge({ status }: { status: string }) {
     const s = status || '';
     let cls = 'bg-blue-600 text-white';
