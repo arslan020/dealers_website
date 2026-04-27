@@ -3,6 +3,7 @@ import connectToDatabase from '@/lib/db';
 import Tenant from '@/models/Tenant';
 import { verifyAccessToken } from '@/lib/auth';
 import AutoTraderStockCache from '@/models/AutoTraderStockCache';
+import { importVehiclesFromAT } from '@/lib/importVehiclesFromAT';
 import User from '@/models/User';
 import Vehicle from '@/models/Vehicle';
 import Customer from '@/models/Customer';
@@ -57,11 +58,22 @@ export async function PATCH(
             return NextResponse.json({ ok: false, error: { message: 'Tenant not found.', code: 'NOT_FOUND' } }, { status: 404 });
         }
 
-        // If AT keys were cleared (apiKey is empty/null), delete the cached stock for this tenant
-        const keysCleared = autoTraderConfig !== undefined && !autoTraderConfig?.apiKey;
-        if (keysCleared) {
+        // If dealerId was just set → auto-import vehicles from AT in background
+        const dealerIdSet = autoTraderConfig?.dealerId && autoTraderConfig.dealerId.trim() !== '';
+        if (dealerIdSet) {
+            importVehiclesFromAT(id).then(({ imported, updated }) => {
+                console.log(`[AutoTrader] Auto-import for tenant ${id}: ${imported} new, ${updated} updated.`);
+            }).catch(err => {
+                console.warn(`[AutoTrader] Auto-import failed for tenant ${id}:`, err.message);
+            });
+        }
+
+        // If AT keys were cleared (dealerId empty), delete vehicles and cache
+        const dealerIdCleared = autoTraderConfig !== undefined && !autoTraderConfig?.dealerId;
+        if (dealerIdCleared) {
             await AutoTraderStockCache.deleteOne({ tenantId: id });
-            console.log(`[AutoTrader] Cache cleared for tenant ${id} — API keys removed.`);
+            await Vehicle.deleteMany({ tenantId: id, isLiveOnAT: true });
+            console.log(`[AutoTrader] Vehicles + cache cleared for tenant ${id} — dealerId removed.`);
         }
 
         return NextResponse.json({ ok: true, tenant });
