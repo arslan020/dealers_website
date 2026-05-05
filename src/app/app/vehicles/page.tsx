@@ -4,6 +4,23 @@ import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AddVehicleButton } from '@/components/vehicles/AddVehicleButton';
+function textValue(value: unknown): string {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'object' && value !== null && 'name' in value) {
+        return String((value as { name: unknown }).name ?? '');
+    }
+    return '';
+}
+
+interface PriceIndicatorBands {
+    LOW?: { from: number; to: number };
+    GREAT?: { from: number; to: number };
+    GOOD?: { from: number; to: number };
+    FAIR?: { from: number; to: number };
+    HIGH?: { from: number; to: number };
+}
 
 interface VehicleItem {
     _id: string;
@@ -14,6 +31,7 @@ interface VehicleItem {
     vrm: string;
     status: string;
     price: number;
+    purchasePrice?: number;
     mileage?: number;
     year?: string | number;
     fuelType?: string;
@@ -33,6 +51,18 @@ interface VehicleItem {
     stockId?: string;
     websitePublished: boolean;
     atAdvertStatus?: 'PUBLISHED' | 'NOT_PUBLISHED';
+    atData?: {
+        adverts?: {
+            retailAdverts?: {
+                priceIndicatorRating?: string;
+                priceIndicatorRatingBands?: PriceIndicatorBands;
+                vatStatus?: string;
+                suppliedPrice?: { amountGBP?: number };
+            };
+            forecourtPrice?: { amountGBP?: number };
+        };
+        vatScheme?: string;
+    };
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -55,6 +85,51 @@ function formatDateGB(dateStr?: string) {
     return new Date(dateStr).toLocaleDateString('en-GB');
 }
 
+const INDICATOR_CONFIG: Record<string, { label: string; dot: string; text: string }> = {
+    GREAT: { label: 'Great Price', dot: 'bg-green-500', text: 'text-green-600' },
+    GOOD:  { label: 'Good Price',  dot: 'bg-blue-500',  text: 'text-blue-600' },
+    FAIR:  { label: 'Fair Price',  dot: 'bg-yellow-400', text: 'text-yellow-600' },
+    HIGH:  { label: 'High Price',  dot: 'bg-red-400',   text: 'text-red-500' },
+    LOW:   { label: 'Low Price',   dot: 'bg-slate-700', text: 'text-slate-700' },
+};
+
+function PriceIndicatorCell({ rating }: { rating?: string }) {
+    if (!rating) return <span className="text-[12px] text-slate-300 italic">No data.</span>;
+    const cfg = INDICATOR_CONFIG[rating] || { label: rating, dot: 'bg-slate-400', text: 'text-slate-500' };
+    return (
+        <div className="flex items-center justify-center gap-1.5">
+            <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${cfg.dot}`} />
+            <span className={`text-[12px] font-semibold ${cfg.text}`}>{cfg.label}</span>
+        </div>
+    );
+}
+
+function PricePositionCell({ price, bands }: { price: number; bands?: PriceIndicatorBands }) {
+    if (!bands || !price) return <span className="text-[12px] text-slate-300 italic">No data.</span>;
+
+    const goodMid = bands.GOOD ? (bands.GOOD.from + bands.GOOD.to) / 2 : 0;
+    if (!goodMid) return <span className="text-[12px] text-slate-300 italic">No data.</span>;
+
+    const pct = Math.round((price / goodMid) * 100);
+    const fairBoundary = bands.GOOD?.to || goodMid;
+    const rangeMax = fairBoundary * 1.4;
+
+    const fillPct = Math.min((price / rangeMax) * 100, 100);
+    const dividerPct = Math.min((fairBoundary / rangeMax) * 100, 100);
+
+    const fillColor = pct <= 100 ? 'bg-teal-400' : pct <= 108 ? 'bg-yellow-400' : 'bg-red-400';
+
+    return (
+        <div className="flex flex-col items-center gap-0.5 w-28 mx-auto">
+            <div className="relative w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className={`absolute left-0 top-0 h-full rounded-full ${fillColor}`} style={{ width: `${fillPct}%` }} />
+                <div className="absolute top-0 h-full w-px bg-slate-400" style={{ left: `${dividerPct}%` }} />
+            </div>
+            <span className="text-[11px] font-bold text-slate-600">{pct}%</span>
+        </div>
+    );
+}
+
 function VehiclesContent() {
     const searchParams = useSearchParams();
 
@@ -75,7 +150,11 @@ function VehiclesContent() {
         if (urlSpecial) return urlSpecial;
         return 'all';
     });
-    const [viewMode, setViewMode] = useState<'browse' | 'pricing' | 'advertising'>('browse');
+    const [viewMode, setViewMode] = useState<'browse' | 'pricing' | 'advertising'>(() => {
+        const v = searchParams.get('view');
+        if (v === 'advertising' || v === 'pricing') return v;
+        return 'browse';
+    });
 
     // Filter panel
     const [showFilter, setShowFilter] = useState(false);
@@ -96,6 +175,30 @@ function VehiclesContent() {
     // Pending ad changes
     const [pendingAd, setPendingAd] = useState<Record<string, Partial<VehicleItem>>>({});
     const [savingRows, setSavingRows] = useState<Record<string, boolean>>({});
+
+    // AT Sync
+    const [syncing, setSyncing] = useState(false);
+    const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        setSyncMsg(null);
+        try {
+            const res = await fetch('/api/vehicles/autotrader-stock');
+            const data = await res.json();
+            if (data.ok !== false) {
+                setSyncMsg({ ok: true, text: 'Synced with AutoTrader' });
+                fetchVehicles();
+            } else {
+                setSyncMsg({ ok: false, text: data.error?.message || 'Sync failed' });
+            }
+        } catch {
+            setSyncMsg({ ok: false, text: 'Sync failed' });
+        } finally {
+            setSyncing(false);
+            setTimeout(() => setSyncMsg(null), 3000);
+        }
+    };
 
 
     const fetchVehicles = useCallback(async () => {
@@ -201,8 +304,8 @@ function VehiclesContent() {
                     break;
             }
 
-            if (filterMake && v.make?.toLowerCase() !== filterMake.toLowerCase()) return false;
-            if (filterModel && !v.model?.toLowerCase().includes(filterModel.toLowerCase())) return false;
+            if (filterMake && textValue(v.make).toLowerCase() !== filterMake.toLowerCase()) return false;
+            if (filterModel && !textValue(v.model).toLowerCase().includes(filterModel.toLowerCase())) return false;
             if (filterReg && !v.vrm?.toLowerCase().includes(filterReg.toLowerCase())) return false;
             if (filterFuel && v.fuelType?.toLowerCase() !== filterFuel.toLowerCase()) return false;
             if (filterBodyType && v.bodyType?.toLowerCase() !== filterBodyType.toLowerCase()) return false;
@@ -236,7 +339,7 @@ function VehiclesContent() {
     const downloadCSV = () => {
         const target = selectedIds.size > 0 ? filteredVehicles.filter(v => selectedIds.has(v._id)) : filteredVehicles;
         const headers = ['VRM', 'Make', 'Model', 'Derivative', 'Status', 'Price', 'Mileage'];
-        const rows = target.map(v => [v.vrm, v.make, v.model, v.derivative, v.status, v.price, v.mileage || '']);
+        const rows = target.map(v => [v.vrm, textValue(v.make), textValue(v.model), textValue(v.derivative), v.status, v.price, v.mileage || '']);
         const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -246,15 +349,15 @@ function VehiclesContent() {
     const downloadExcel = () => {
         const target = selectedIds.size > 0 ? filteredVehicles.filter(v => selectedIds.has(v._id)) : filteredVehicles;
         const headers = ['VRM', 'Make', 'Model', 'Derivative', 'Status', 'Price', 'Mileage'];
-        const rows = target.map(v => [v.vrm, v.make, v.model, v.derivative, v.status, v.price, v.mileage || '']);
+        const rows = target.map(v => [v.vrm, textValue(v.make), textValue(v.model), textValue(v.derivative), v.status, v.price, v.mileage || '']);
         const table = `<table><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</table>`;
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([table], { type: 'application/vnd.ms-excel' }));
         a.download = 'vehicles.xls'; a.click();
     };
 
-    const uniqueMakes = Array.from(new Set(vehicles.map(v => v.make).filter(Boolean))).sort();
-    const uniqueModels = Array.from(new Set(vehicles.filter(v => !filterMake || v.make === filterMake).map(v => v.model).filter(Boolean))).sort();
+    const uniqueMakes = Array.from(new Set(vehicles.map(v => textValue(v.make)).filter(Boolean))).sort();
+    const uniqueModels = Array.from(new Set(vehicles.filter(v => !filterMake || textValue(v.make) === filterMake).map(v => textValue(v.model)).filter(Boolean))).sort();
 
     return (
         <div className="flex flex-col min-h-screen bg-[#f0f2f5]">
@@ -279,11 +382,15 @@ function VehiclesContent() {
                     ))}
                     <div className="w-px h-5 bg-slate-200 mx-1 shrink-0" />
                     {/* View mode — blue underline, independent of filter tabs */}
-                    {(['browse', 'advertising'] as const).map(v => (
-                        <button key={v} onClick={() => setViewMode(v)}
-                            className={`px-3 py-3 text-[13px] whitespace-nowrap transition-colors capitalize shrink-0 ${
-                                viewMode === v ? 'font-bold text-blue-600 border-b-2 border-blue-500' : 'font-medium text-slate-400 hover:text-slate-600'
-                            }`}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
+                    {([
+                        { id: 'browse', label: 'Browse' },
+                        { id: 'pricing', label: 'Pricing' },
+                        { id: 'advertising', label: 'Advertising' },
+                    ] as const).map(v => (
+                        <button key={v.id} onClick={() => setViewMode(v.id)}
+                            className={`px-3 py-3 text-[13px] whitespace-nowrap transition-colors shrink-0 ${
+                                viewMode === v.id ? 'font-bold text-blue-600 border-b-2 border-blue-500' : 'font-medium text-slate-400 hover:text-slate-600'
+                            }`}>{v.label}</button>
                     ))}
                     <div className="w-px h-5 bg-slate-200 mx-1 shrink-0" />
                     {/* Special filters */}
@@ -333,6 +440,21 @@ function VehiclesContent() {
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" /></svg>
                         Filter
                     </button>
+                    <button
+                        onClick={handleSync}
+                        disabled={syncing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-indigo-400 text-indigo-600 rounded-lg text-[12px] font-semibold hover:bg-indigo-50 transition-colors disabled:opacity-60"
+                    >
+                        <svg className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        {syncing ? 'Syncing…' : 'Sync AT'}
+                    </button>
+                    {syncMsg && (
+                        <span className={`text-[12px] font-semibold ${syncMsg.ok ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {syncMsg.text}
+                        </span>
+                    )}
                 </div>
                 <input
                     type="text"
@@ -416,7 +538,7 @@ function VehiclesContent() {
                             <label className="block text-[12px] font-medium text-slate-600 mb-1.5">Derivative</label>
                             <select className="w-full border border-slate-200 rounded px-3 py-2 text-[13px] focus:outline-none focus:border-blue-400">
                                 <option>Nothing selected</option>
-                                {Array.from(new Set(vehicles.map(v => v.derivative).filter(Boolean))).sort().map(d => <option key={d}>{d}</option>)}
+                                {Array.from(new Set(vehicles.map(v => textValue(v.derivative)).filter(Boolean))).sort().map(d => <option key={d}>{d}</option>)}
                             </select>
                         </div>
                         {/* Engine Size */}
@@ -585,10 +707,13 @@ function VehiclesContent() {
                                 )}
                                 {viewMode === 'pricing' && (
                                     <>
-                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-40">SALE PRICE</th>
-                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-40">STAND IN</th>
-                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">PRICE POSITION</th>
-                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">INDICATOR</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-24">VAT</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">SIV COST ⇅</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-40">WEBSITE PRICE ⇅</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-40">CHANNEL PRICE ⇅</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">PRICE POSITION ⇅</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">PRICE INDICATOR ⇅</th>
+                                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center w-36">TRADE ⇅</th>
                                     </>
                                 )}
                                 {viewMode === 'advertising' && (
@@ -634,9 +759,9 @@ function VehiclesContent() {
                                                     href={`/app/vehicles/${vehicle._id}`}
                                                     className="text-[13px] font-semibold text-blue-600 hover:underline leading-tight block truncate max-w-[380px]"
                                                 >
-                                                    {vehicle.make} {vehicle.vehicleModel || vehicle.model} {vehicle.derivative
-                                                        ? (vehicle.derivative.length > 45 ? vehicle.derivative.substring(0, 45) + '…' : vehicle.derivative)
-                                                        : ''}
+                                                    {textValue(vehicle.make)} {textValue(vehicle.vehicleModel || vehicle.model)} {
+                                                        (() => { const d = textValue(vehicle.derivative); return d ? (d.length > 45 ? d.substring(0, 45) + '…' : d) : ''; })()
+                                                    }
                                                 </Link>
                                                 <div className="text-[12px] text-slate-500 mt-0.5">
                                                     <span className="font-bold text-slate-700">{vehicle.vrm}</span>
@@ -683,29 +808,60 @@ function VehiclesContent() {
                                     )}
 
                                     {/* Pricing columns */}
-                                    {viewMode === 'pricing' && (
-                                        <>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex items-center border border-slate-200 rounded overflow-hidden w-36 mx-auto">
-                                                    <span className="px-2 py-1.5 text-slate-400 border-r border-slate-200 text-[13px]">£</span>
-                                                    <input
-                                                        type="number"
-                                                        defaultValue={vehicle.price || ''}
-                                                        onBlur={e => { if (e.target.value) handleUpdateVehicle(vehicle._id, { price: parseFloat(e.target.value) }); }}
-                                                        className="flex-1 px-2 py-1.5 text-[13px] outline-none w-0"
-                                                    />
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex items-center border border-slate-200 rounded overflow-hidden w-36 mx-auto">
-                                                    <span className="px-2 py-1.5 text-slate-400 border-r border-slate-200 text-[13px]">£</span>
-                                                    <input type="number" className="flex-1 px-2 py-1.5 text-[13px] outline-none w-0" />
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center text-[12px] text-slate-400 italic">No data.</td>
-                                            <td className="px-4 py-3 text-center text-[12px] text-slate-400 italic">No data.</td>
-                                        </>
-                                    )}
+                                    {viewMode === 'pricing' && (() => {
+                                        const ra = vehicle.atData?.adverts?.retailAdverts;
+                                        const vatLabel = ra?.vatStatus || vehicle.atData?.vatScheme || null;
+                                        const rating = ra?.priceIndicatorRating;
+                                        const bands = ra?.priceIndicatorRatingBands;
+                                        const currentPrice = vehicle.price || 0;
+                                        return (
+                                            <>
+                                                {/* VAT */}
+                                                <td className="px-4 py-3 text-center">
+                                                    {vatLabel
+                                                        ? <span className="text-[12px] font-semibold text-blue-500">{vatLabel}</span>
+                                                        : <span className="text-[12px] text-slate-300">—</span>
+                                                    }
+                                                </td>
+                                                {/* SIV Cost */}
+                                                <td className="px-4 py-3 text-center text-[13px] font-semibold text-slate-700">
+                                                    {vehicle.purchasePrice
+                                                        ? `£${Number(vehicle.purchasePrice).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                        : <span className="text-slate-300 text-[12px]">—</span>
+                                                    }
+                                                </td>
+                                                {/* Website Price */}
+                                                <td className="px-4 py-3 text-center">
+                                                    <div className="flex items-center border border-slate-200 rounded overflow-hidden w-36 mx-auto">
+                                                        <span className="px-2 py-1.5 text-slate-400 border-r border-slate-200 text-[13px]">£</span>
+                                                        <input
+                                                            type="number"
+                                                            defaultValue={currentPrice || ''}
+                                                            onBlur={e => { if (e.target.value) handleUpdateVehicle(vehicle._id, { price: parseFloat(e.target.value) }); }}
+                                                            className="flex-1 px-2 py-1.5 text-[13px] outline-none w-0"
+                                                        />
+                                                    </div>
+                                                </td>
+                                                {/* Channel Price */}
+                                                <td className="px-4 py-3 text-center">
+                                                    <div className="flex items-center border border-slate-200 rounded overflow-hidden w-36 mx-auto">
+                                                        <span className="px-2 py-1.5 text-slate-400 border-r border-slate-200 text-[13px]">£</span>
+                                                        <input type="number" className="flex-1 px-2 py-1.5 text-[13px] outline-none w-0" />
+                                                    </div>
+                                                </td>
+                                                {/* Price Position */}
+                                                <td className="px-4 py-3 text-center">
+                                                    <PricePositionCell price={currentPrice} bands={bands} />
+                                                </td>
+                                                {/* Price Indicator */}
+                                                <td className="px-4 py-3 text-center">
+                                                    <PriceIndicatorCell rating={rating} />
+                                                </td>
+                                                {/* Trade */}
+                                                <td className="px-4 py-3 text-center text-[12px] text-slate-400 italic">No data.</td>
+                                            </>
+                                        );
+                                    })()}
 
                                     {/* Advertising columns */}
                                     {viewMode === 'advertising' && (
@@ -763,7 +919,7 @@ function VehiclesContent() {
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                             </Link>
                                             <button
-                                                onClick={() => handleDelete(vehicle._id, vehicle.make, vehicle.vrm)}
+                                                onClick={() => handleDelete(vehicle._id, textValue(vehicle.make), vehicle.vrm)}
                                                 title="Delete"
                                                 className="w-9 h-9 bg-pink-500 hover:bg-pink-600 text-white rounded flex items-center justify-center transition-colors shadow-sm"
                                             >

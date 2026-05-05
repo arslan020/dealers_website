@@ -60,13 +60,17 @@ async function handleOptionalExtras(req: NextRequest) {
 
         const optionalExtras: {
             name: string;
+            genericName: string | null;
             price: number | null;
             fitted: boolean;
             category: string;
+            factoryCodes: string[];
             rarityRating: string | null;
             valueRating: string | null;
+            finish: string | null;
+            genericFinish: string | null;
         }[] = [];
-        const standardFeatures: { name: string; category: string }[] = [];
+        const standardFeatures: { name: string; genericName: string | null; category: string; factoryCodes: string[] }[] = [];
         const factoryFitted: string[] = [];
 
         rawFeatures.forEach((f: any) => {
@@ -76,6 +80,8 @@ async function handleOptionalExtras(req: NextRequest) {
             // AT type field is exactly "Standard" or "Optional"
             const isOptional: boolean = f.type === 'Optional';
             const category: string = f.category || 'Other';
+            const genericName: string | null = f.genericName || null;
+            const factoryCodes: string[] = Array.isArray(f.factoryCodes) ? f.factoryCodes : [];
 
             // Total displayed price = basicPrice (ex-VAT) + vatPrice
             const basicPrice = typeof f.basicPrice === 'number' ? f.basicPrice : null;
@@ -94,15 +100,19 @@ async function handleOptionalExtras(req: NextRequest) {
             if (isOptional) {
                 optionalExtras.push({
                     name,
+                    genericName,
                     price: totalPrice,
                     fitted: isFitted,
                     category,
+                    factoryCodes,
                     rarityRating: f.rarityRating || null,
                     valueRating: f.valueRating || null,
+                    finish: f.finish || null,
+                    genericFinish: f.genericFinish || null,
                 });
             } else {
                 // type === "Standard"
-                standardFeatures.push({ name, category });
+                standardFeatures.push({ name, genericName, category, factoryCodes });
             }
         });
 

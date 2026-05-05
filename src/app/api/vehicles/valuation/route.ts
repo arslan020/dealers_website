@@ -3,15 +3,6 @@ import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
 
-const CONDITION_MAP: Record<string, 'Excellent' | 'Great' | 'Good' | 'Fair' | 'Poor'> = {
-    Excellent: 'Excellent',
-    Good: 'Good',
-    Average: 'Fair',
-    Poor: 'Poor',
-    New: 'Excellent',
-    Fair: 'Fair',
-};
-
 async function getVehicleValuation(req: NextRequest) {
     const token = req.cookies.get('access_token')?.value;
     const session = token ? await verifyAccessToken(token) : null;
@@ -21,75 +12,127 @@ async function getVehicleValuation(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { vrm, mileage, condition, derivativeId: providedDerivativeId, registeredDate: providedRegDate, features } = body;
+    const {
+        vrm, mileage, derivativeId, features, price,
+        firstRegistrationDate: frd,
+        registeredDate,       // alias sent by quick-check page
+        conditionRating: cr,
+        condition,            // alias sent by quick-check page
+    } = body;
 
-    if (!vrm || !mileage) {
-        return NextResponse.json({ ok: false, error: { message: 'VRM and mileage are required.', code: 'VALIDATION_ERROR' } }, { status: 400 });
+    const firstRegistrationDate = frd || registeredDate;
+
+    // AT docs: accepted values are title-case — Excellent, Great, Good, Fair, Poor
+    const CONDITION_MAP: Record<string, string> = {
+        excellent: 'Excellent', great: 'Great', good: 'Good',
+        fair: 'Fair', poor: 'Poor', average: 'Fair', new: 'Excellent',
+    };
+    const conditionRating = CONDITION_MAP[(cr || condition || '').toLowerCase()];
+
+    if (!mileage) {
+        return NextResponse.json({ ok: false, error: { message: 'mileage is required.', code: 'VALIDATION_ERROR' } }, { status: 400 });
+    }
+    if (!vrm && !derivativeId) {
+        return NextResponse.json({ ok: false, error: { message: 'vrm or derivativeId is required.', code: 'VALIDATION_ERROR' } }, { status: 400 });
     }
 
-    const conditionRating = CONDITION_MAP[condition] ?? 'Good';
     const odometerReadingMiles = parseInt(mileage);
 
     try {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        let derivativeId = providedDerivativeId;
-        let firstRegistrationDate = providedRegDate;
+        let valuationsObj: any;
+        let metricsRaw: any = {};
 
-        // Only do taxonomy lookup if derivativeId not provided
-        if (!derivativeId) {
-            const lookupResponse = await client.get('/taxonomy/vehicles', { vrm: vrm.toUpperCase().replace(/\s/g, '') });
-            const vehicle = Array.isArray(lookupResponse) ? lookupResponse[0] : (lookupResponse.vehicle || lookupResponse);
-            if (!vehicle || !vehicle.derivativeId) {
-                return NextResponse.json({ ok: false, error: { message: 'Vehicle details not found for valuation.', code: 'NOT_FOUND' } }, { status: 404 });
-            }
-            derivativeId = vehicle.derivativeId;
-            firstRegistrationDate = firstRegistrationDate || vehicle.firstRegistrationDate || (vehicle.registrationYear ? `${vehicle.registrationYear}-01-01` : undefined);
-        }
-
-        if (!firstRegistrationDate) {
-            firstRegistrationDate = '2000-01-01'; // fallback
-        }
-
-        const featuresPayload = Array.isArray(features) && features.length > 0
-            ? features.map((f: any) => (typeof f === 'string' ? { name: f } : { name: f.name ?? f }))
-            : undefined;
-
-        // Fetch valuations + vehicle metrics in parallel
-        const [valuationResponse, metricsResponse] = await Promise.allSettled([
-            client.getValuation({
+        if (derivativeId && firstRegistrationDate) {
+            // AT docs: POST /valuations — supports feature adjustment, condition rating, price indicator
+            const payload: any = {
                 vehicle: { derivativeId, firstRegistrationDate, odometerReadingMiles },
-                conditionRating,
-                ...(featuresPayload && { features: featuresPayload }),
-            }),
-            client.get('/vehicles', {
-                registration: vrm.toUpperCase().replace(/\s/g, ''),
-                advertiserId: client.dealerId || '',
+            };
+            if (conditionRating) payload.conditionRating = conditionRating;
+            // features: pass array of { name } objects; empty array = base valuation; omitted = market value
+            if (Array.isArray(features)) {
+                payload.features = features.map((f: any) => ({ name: typeof f === 'string' ? f : f.name }));
+            }
+            // price: triggers priceIndicatorRating in retail response
+            if (price != null) {
+                payload.adverts = { retailAdverts: { price: { amountGBP: Number(price) } } };
+            }
+
+            const registration = vrm ? (vrm as string).toUpperCase().replace(/\s/g, '') : null;
+            const [valuationRes, metricsRes] = await Promise.all([
+                client.post('/valuations', payload, { advertiserId: client.dealerId! }),
+                registration ? client.get('/vehicles', {
+                    registration,
+                    advertiserId: client.dealerId!,
+                    valuations: 'true',
+                    vehicleMetrics: 'true',
+                    odometerReadingMiles: String(odometerReadingMiles),
+                }) : Promise.resolve(null),
+            ]);
+            valuationsObj = valuationRes?.valuations;
+            metricsRaw = metricsRes ?? {};
+        } else {
+            // Fallback: VRM-based lookup with valuations — no feature/condition adjustment
+            const registration = (vrm as string).toUpperCase().replace(/\s/g, '');
+            const response = await client.get('/vehicles', {
+                registration,
+                advertiserId: client.dealerId!,
+                valuations: 'true',
                 vehicleMetrics: 'true',
                 odometerReadingMiles: String(odometerReadingMiles),
-            }),
-        ]);
-
-        const valuations = valuationResponse.status === 'fulfilled' ? valuationResponse.value?.valuations : null;
-        // rating & daysToSell are top-level in the /vehicles response, vehicleMetrics is nested
-        const metricsRaw = metricsResponse.status === 'fulfilled' ? metricsResponse.value : null;
-        const metricsData = metricsRaw ? {
-            vehicleMetrics: metricsRaw.vehicleMetrics ?? null,
-            rating: metricsRaw.rating ?? null,
-            daysToSell: metricsRaw.daysToSell ?? null,
-        } : null;
-
-        if (!valuations) {
-            const errMsg = valuationResponse.status === 'rejected' ? valuationResponse.reason?.message : 'No valuation data returned.';
-            return NextResponse.json({ ok: false, error: { message: errMsg || 'Failed to fetch valuation.' } }, { status: 500 });
+            });
+            valuationsObj = response?.valuations;
+            metricsRaw = response ?? {};
         }
 
-        return NextResponse.json({
-            ok: true,
-            valuations,
-            metrics: metricsData ?? null,
-        });
+        if (!valuationsObj) {
+            return NextResponse.json({
+                ok: false,
+                error: { message: 'Valuation not available for this vehicle.' }
+            }, { status: 404 });
+        }
+
+        // Normalise to array format for the frontend
+        const valuationsArray = [
+            {
+                valuationType: 'Trade',
+                amountGBP: valuationsObj.trade?.amountGBP ?? null,
+            },
+            {
+                valuationType: 'PartExchange',
+                amountGBP: valuationsObj.partExchange?.amountGBP ?? null,
+            },
+            {
+                valuationType: 'Retail',
+                amountGBP: valuationsObj.retail?.amountGBP ?? null,
+                priceIndicatorRating: valuationsObj.retail?.priceIndicatorRating ?? null,
+                priceIndicatorRatingBands: valuationsObj.retail?.priceIndicatorRatingBands ?? null,
+            },
+            {
+                valuationType: 'Private',
+                amountGBP: valuationsObj.private?.amountGBP ?? null,
+            },
+        ].filter(v => v.amountGBP != null);
+
+        if (valuationsArray.length === 0) {
+            return NextResponse.json({
+                ok: false,
+                error: { message: 'Valuation not available for this vehicle.' }
+            }, { status: 404 });
+        }
+
+        const vm = metricsRaw?.vehicleMetrics;
+        const ratingRaw    = metricsRaw?.rating    ?? vm?.rating;
+        const daysToSellRaw = metricsRaw?.daysToSell ?? vm?.daysToSell;
+        const metrics = (vm || ratingRaw != null || daysToSellRaw != null) ? {
+            vehicleMetrics: vm ?? null,
+            rating:     typeof ratingRaw    === 'object' ? (ratingRaw?.value     ?? null) : (ratingRaw     ?? null),
+            daysToSell: typeof daysToSellRaw === 'object' ? (daysToSellRaw?.value ?? null) : (daysToSellRaw ?? null),
+        } : null;
+
+        return NextResponse.json({ ok: true, valuations: valuationsArray, metrics });
 
     } catch (error: any) {
         console.error('[Valuation API Error]', error.message);

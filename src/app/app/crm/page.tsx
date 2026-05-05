@@ -172,7 +172,14 @@ function CRMContent() {
             let allLeads: Lead[] = [];
 
             if (localData.ok) {
-                allLeads = [...allLeads, ...localData.leads.map((l: any) => ({ ...l, source: l.platform || 'Local' }))];
+                allLeads = [...allLeads, ...localData.leads.map((l: any) => ({
+                    ...l,
+                    source: l.platform || 'Local',
+                    // Normalize status: MongoDB may return an object like { name: 'NEW_LEAD' }
+                    status: typeof l.status === 'object' && l.status !== null
+                        ? (l.status.name || l.status.value || String(l.status))
+                        : (l.status || 'NEW_LEAD'),
+                }))];
             }
 
             // AutoTrader Pagination Loop to handle 50+ deals
@@ -444,8 +451,15 @@ function CRMContent() {
         }
     };
 
-    const getStatusStyle = (status: string) => {
-        const s = (status || '').toUpperCase();
+    // Safely coerce status to string (guards against object values from DB)
+    const getStatusStr = (status: any): string => {
+        if (!status) return '';
+        if (typeof status === 'object') return status.name || status.value || '';
+        return String(status);
+    };
+
+    const getStatusStyle = (status: any) => {
+        const s = getStatusStr(status).toUpperCase();
         if (s.includes('NEW_MESSAGE')) return 'bg-emerald-500 text-white border-emerald-600';
         if (s.includes('NEW')) return 'bg-emerald-400 text-white border-emerald-500';
         if (s.includes('ACK') || s.includes('PROGRESS')) return 'bg-blue-500 text-white border-blue-600';
@@ -543,7 +557,7 @@ function CRMContent() {
                                     const isSelected = selectedLead?.dealId === lead.dealId || (selectedLead?._id && selectedLead._id === lead._id);
                                     let avatarColor = 'bg-slate-400';
                                     if (lead.source === 'AutoTrader') avatarColor = 'bg-[#3eb6cd]'; // AT blue
-                                    if (lead.status.includes('ACK')) avatarColor = 'bg-[#e49d44]'; // orange 
+                                    if (getStatusStr(lead.status).includes('ACK')) avatarColor = 'bg-[#e49d44]'; // orange 
 
                                     return (
                                         <div
@@ -559,10 +573,10 @@ function CRMContent() {
                                                 <div className="flex-1 min-w-0 pr-4">
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${getStatusStyle(lead.status)}`}>
-                                                            {lead.status.replace(/_/g, ' ')}
+                                                            {getStatusStr(lead.status).replace(/_/g, ' ')}
                                                         </span>
                                                         <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                                                            <div className={`w-2 h-2 rounded-full ${lead.status.includes('NEW') ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
+                                                            <div className={`w-2 h-2 rounded-full ${getStatusStr(lead.status).includes('NEW') ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
                                                             {getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}
                                                         </div>
                                                     </div>

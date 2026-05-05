@@ -19,11 +19,14 @@ import { VehicleLeadsDealsTab } from '@/components/vehicles/VehicleLeadsDealsTab
 import { VehicleReserveTab } from '@/components/vehicles/VehicleReserveTab';
 import { VehicleSellTab } from '@/components/vehicles/VehicleSellTab';
 
+import { textValue } from '@/lib/textValue';
+
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 interface VehicleDetail {
     id: string;
     _id?: string;
     vrm: string;
+    vin?: string;
     make: string;
     model: string;
     derivative: string;
@@ -102,6 +105,35 @@ interface VehicleDetail {
     imageMetadata?: Record<string, { group?: string; banner?: string; bannerColor?: string; branding?: boolean; watermark?: boolean }>;
     history?: { scrapped: boolean; stolen: boolean; imported: boolean; exported: boolean; previousOwners: number };
     check?: { insuranceWriteoffCategory: string | null; privateFinance: boolean | null; tradeFinance: boolean | null; highRisk: boolean | null; mileageDiscrepancy: boolean | null; colourChanged: boolean | null };
+    priceOnApplication?: boolean;
+    atPriceOnApplication?: boolean;
+    purchaseDate?: string;
+    supplierName?: string;
+    supplierInvoiceNo?: string;
+    vatType?: string;
+    purchaseVatAmount?: number;
+    fundingProvider?: string;
+    fundingAmount?: number;
+    vehicleAdditionalCosts?: any[];
+    referenceId?: string;
+    engineNumber?: string;
+    newKeeperReference?: string;
+    keyReference?: string;
+    dueInDate?: string;
+    dateOnForecourt?: string;
+    location?: string;
+    origin?: string;
+    saleOrReturn?: boolean;
+    demonstrator?: boolean;
+    trade?: boolean;
+    stockNotes?: string;
+    vatStatus?: string;
+    reservePaymentAmount?: number;
+    quantityAvailable?: number;
+    dateInStock?: string;
+    workflowStages?: Record<string, { completed: boolean; date?: string; notes?: string }>;
+    technicalSpecs?: Record<string, any>;
+    manualSpecs?: Record<string, any>;
 }
 
 interface Deal {
@@ -132,7 +164,14 @@ const LIFECYCLE_OPTIONS = [
     { value: 'Deleted', label: 'Deleted', color: 'bg-red-100 text-red-700' },
 ];
 
-const FUEL_TYPES = ['Petrol', 'Diesel', 'Electric', 'Hybrid', 'Plug-in Hybrid', 'Mild Hybrid', 'Hydrogen'];
+const FUEL_TYPES = [
+    'Petrol', 'Diesel', 'Electric',
+    'Petrol Hybrid', 'Diesel Hybrid',
+    'Petrol Plug-in Hybrid', 'Diesel Plug-in Hybrid',
+    'Petrol Mild Hybrid', 'Diesel Mild Hybrid',
+    'Hybrid', 'Plug-in Hybrid', 'Mild Hybrid',
+    'Hydrogen',
+];
 const TRANSMISSIONS = ['Automatic', 'Manual'];
 const BODY_TYPES = ['Saloon', 'Hatchback', 'Estate', 'SUV', 'Coupe', 'Convertible', 'Van', 'Pickup', 'MPV', 'Crossover'];
 const VEHICLE_TYPES = ['Car', 'Van', 'Motorbike', 'Motorhome'];
@@ -148,8 +187,10 @@ const TAB_GROUPS = [
             { id: 'vehicle',    label: 'Vehicle',         icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M5 13l1.5-5h11L19 13M5 13H3v3h1m15-3h2v3h-1M5 13h14M7 16v1m10-1v1"/><circle cx="7.5" cy="17.5" r="1.5" strokeWidth="1.8"/><circle cx="16.5" cy="17.5" r="1.5" strokeWidth="1.8"/></svg> },
             { id: 'images',     label: 'Images & Videos', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" strokeWidth="1.8"/><circle cx="8.5" cy="10.5" r="1.5" strokeWidth="1.8"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21 15l-5-5L7 19"/></svg> },
             { id: 'options',    label: 'Options',         icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 12h16M4 18h10"/></svg> },
-            { id: 'history',    label: 'History',         icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> },
-            { id: 'salesChannels', label: 'Sales Channels', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg> },
+            { id: 'history',      label: 'History',          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> },
+            { id: 'purchaseCosts', label: 'Purchase & Costs', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> },
+            { id: 'stockPrice',    label: 'Stock & Price',    icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg> },
+            { id: 'salesChannels', label: 'Sales Channels',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg> },
         ],
     },
     {
@@ -163,6 +204,7 @@ const TAB_GROUPS = [
     {
         tabs: [
             { id: 'jobBoards',   label: 'Job Boards',   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> },
+            { id: 'workflow',    label: 'Workflow',     icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg> },
             { id: 'checklist',   label: 'Checklist',    icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg> },
             { id: 'specification',label: 'Specification', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg> },
             { id: 'settings',    label: 'Settings',     icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" strokeWidth="1.8"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> },
@@ -204,11 +246,11 @@ function VinRow({ atVehicle }: { atVehicle: any }) {
 
 /* ─── Derivative Smart Selector Component ───────────────────────────────────── */
 function DerivativeSelector({
-    currentDerivative, make, model, generation, fuelType, engineSize,
+    currentDerivative, make, model, generation, generationId, fuelType, engineSize,
     onChange, onAutoComplete
 }: {
     currentDerivative: string;
-    make?: string; model?: string; generation?: string;
+    make?: string; model?: string; generation?: string; generationId?: string;
     fuelType?: string; engineSize?: string;
     onChange: (label: string) => void;
     onAutoComplete: (fields: Record<string, any>) => void;
@@ -223,16 +265,21 @@ function DerivativeSelector({
     useEffect(() => { setQuery(currentDerivative || ''); }, [currentDerivative]);
 
     const search = async () => {
-        if (!make && !model) return;
+        if (!make && !model && !generationId) return;
         setLoading(true);
         setOpen(true);
         try {
             const params = new URLSearchParams();
-            if (make) params.set('make', make);
-            if (model) params.set('model', model);
-            if (generation) params.set('generation', generation);
+            // Prefer generationId (already resolved) — skips the full taxonomy chain on AT side
+            if (generationId) {
+                params.set('generationId', generationId);
+            } else {
+                if (make) params.set('make', make);
+                if (model) params.set('model', model);
+                if (generation) params.set('generation', generation);
+            }
+            // AT-supported derivative filters per docs: fuelType, transmission, trim
             if (fuelType) params.set('fuelType', fuelType);
-            if (engineSize) params.set('engineSize', engineSize);
             const res = await fetch(`/api/vehicles/derivatives?${params.toString()}`);
             const data = await res.json();
             setOptions(data.derivatives || []);
@@ -257,31 +304,42 @@ function DerivativeSelector({
             const res = await fetch(`/api/vehicles/derivatives?id=${selected.id}`);
             const data = await res.json();
             const d = data.derivative || selected;
+            
+            // Helper to extract primitive from AT {name: "..."} taxonomy objects
+            const strVal = (x: any) => {
+                if (!x) return undefined;
+                if (typeof x === 'string') return x;
+                if (typeof x === 'object' && x.name !== undefined) return String(x.name);
+                return String(x);
+            };
+
             onAutoComplete({
-                make: d.make || make,
-                model: d.model || model,
-                generation: d.generation || generation,
-                fuelType: d.fuelType || fuelType,
-                engineSize: d.engineSize || engineSize,
-                transmission: d.transmission,
-                bodyType: d.bodyType,
-                seats: d.seats,
-                doors: d.doors,
-                drivetrain: d.drivetrain,
-                colour: d.colour,
-                derivative: d.label || query,
+                make: strVal(d.make) || make,
+                model: strVal(d.model) || model,
+                generation: strVal(d.generation) || generation,
+                trim: strVal(d.trim) || undefined,
+                fuelType: strVal(d.fuelType) || fuelType,
+                engineSize: d.badgeEngineSizeLitres?.toString() || strVal(d.engineSize) || engineSize,
+                transmission: strVal(d.transmissionType) || strVal(d.transmission),
+                bodyType: strVal(d.bodyType),
+                seats: typeof d.seats === 'object' ? Number(d.seats?.name) || undefined : d.seats,
+                doors: typeof d.doors === 'object' ? Number(d.doors?.name) || undefined : d.doors,
+                drivetrain: strVal(d.drivetrain),
+                colour: strVal(d.colour),
+                derivative: strVal(d.name) || strVal(d.label) || query,
             });
         } catch (e) {
             // fallback: use already-fetched data
+            const strValFallback = (x: any) => (x && typeof x === 'object' && x.name ? x.name : x);
             onAutoComplete({
-                fuelType: selected.fuelType || fuelType,
-                engineSize: selected.engineSize || engineSize,
-                transmission: selected.transmission,
-                bodyType: selected.bodyType,
-                seats: selected.seats,
-                doors: selected.doors,
-                drivetrain: selected.drivetrain,
-                derivative: selected.label || query,
+                fuelType: strValFallback(selected.fuelType) || fuelType,
+                engineSize: strValFallback(selected.engineSize) || engineSize,
+                transmission: strValFallback(selected.transmission),
+                bodyType: strValFallback(selected.bodyType),
+                seats: typeof selected.seats === 'object' ? Number(selected.seats?.name) || undefined : selected.seats,
+                doors: typeof selected.doors === 'object' ? Number(selected.doors?.name) || undefined : selected.doors,
+                drivetrain: strValFallback(selected.drivetrain),
+                derivative: strValFallback(selected.label) || query,
             });
         } finally {
             setAutoFilling(false);
@@ -385,7 +443,6 @@ function DerivativeSelector({
 
 
 /* ─── Competitors Tab Component ─────────────────────────────────────────────── */
-const DISTANCE_OPTIONS = ['Within 10 Miles', 'Within 25 Miles', 'Within 50 Miles', 'Within 100 Miles', 'Within 250 Miles', 'National'];
 const COMP_FUEL_OPTIONS = ['', 'Petrol', 'Diesel', 'Electric', 'Hybrid', 'Plug-in Hybrid', 'Mild Hybrid'];
 const COMP_TRANS_OPTIONS = ['', 'Automatic', 'Manual'];
 const COMP_CONDITION_OPTIONS = ['', 'Used', 'New'];
@@ -484,16 +541,29 @@ function CompetitorScatterChart({
 }
 
 function CompetitorsTab({ vehicle }: { vehicle: any }) {
-    const [filters, setFilters] = useState({
-        trim: '',
-        fuelType: '', transmission: '', drivetrain: '', doors: '',
-        minEngineSize: '', maxEngineSize: '',
-        minMileage: '', maxMileage: '',
-        minYear: String(Math.max(2010, Number(vehicle?.year || 2015) - 2)),
-        maxYear: String(Number(vehicle?.year || 2025) + 2),
-        condition: '', distance: 'Within 250 Miles',
+    const [filters, setFilters] = useState(() => {
+        const engineStr = (() => {
+            if (vehicle?.badgeEngineSizeLitres) return Number(vehicle.badgeEngineSizeLitres).toFixed(1);
+            const raw = String(vehicle?.engineSize || '').replace(/[^\d.]/g, '');
+            const n = raw ? Number(raw) : NaN;
+            if (!Number.isFinite(n)) return '';
+            const litres = n > 100 ? Math.round((n / 1000) * 10) / 10 : n;
+            return litres.toFixed(1);
+        })();
+        return {
+            trim: String(vehicle?.trim || '').trim(),
+            fuelType: String(vehicle?.fuelType || '').trim(),
+            transmission: String(vehicle?.transmission || vehicle?.transmissionType || '').trim(),
+            drivetrain: String(vehicle?.drivetrain || vehicle?.driveTrain || '').trim(),
+            doors: vehicle?.doors != null ? String(vehicle.doors) : '',
+            minEngineSize: engineStr,
+            maxEngineSize: engineStr,
+            minMileage: '', maxMileage: '',
+            minYear: String(Math.max(2010, Number(vehicle?.year || 2015) - 2)),
+            maxYear: String(Number(vehicle?.year || 2025) + 2),
+            condition: '',
+        };
     });
-    const [postcode, setPostcode] = useState('');
     const [results, setResults] = useState<any[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -542,9 +612,12 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
         const vehicleCondition  = String(vehicle?.condition || '').trim();
         const vehicleYear       = Number(vehicle?.year || 0);
         const vehicleEngineSizeLitres = (() => {
-            const raw = String(vehicle?.engineSize || vehicle?.badgeEngineSizeLitres || '').replace(/[^\d.]/g, '');
+            if (vehicle?.badgeEngineSizeLitres) return Number(vehicle.badgeEngineSizeLitres);
+            const raw = String(vehicle?.engineSize || '').replace(/[^\d.]/g, '');
             const n = raw ? Number(raw) : NaN;
-            return Number.isFinite(n) ? n : null;
+            if (!Number.isFinite(n)) return null;
+            // engineSize stored as CC (e.g. "1998") — convert to litres
+            return n > 100 ? Math.round((n / 1000) * 10) / 10 : n;
         })();
 
         // Use filterPool (full set) for options when available, otherwise fall back to displayed results
@@ -564,7 +637,8 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
             return Array.from(buckets).sort((a, b) => a - b);
         })();
 
-        const allYears   = Array.from(new Set([...(vehicleYear > 1900 ? [vehicleYear] : []), ...yearsFromResults])).sort((a, b) => a - b);
+        const vehicleYearRange = vehicleYear > 1900 ? Array.from({ length: 11 }, (_, i) => vehicleYear - 5 + i) : [];
+        const allYears   = Array.from(new Set([...vehicleYearRange, ...yearsFromResults])).sort((a, b) => a - b);
         const allEngines = Array.from(new Set([...(vehicleEngineSizeLitres ? [vehicleEngineSizeLitres] : []), ...engineSizesFromResults])).sort((a, b) => a - b).map(n => n.toFixed(1));
 
         return {
@@ -573,7 +647,7 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
             transmission:  ['', ...uniq([vehicleTrans, ...transFromResults])],
             drivetrain:    ['', ...uniq([vehicleDrivetrain, ...drivesFromResults])],
             doors:         ['', ...uniq([vehicleDoors, ...doorsFromResults])],
-            condition:     ['', ...uniq([vehicleCondition, ...condFromResults])],
+            condition:     ['', 'Used', 'New'],
             minYear:       ['', ...allYears.map(String)],
             maxYear:       ['', ...allYears.map(String)],
             minEngineSize: ['', ...Array.from(new Set(allEngines))],
@@ -593,8 +667,8 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
         try {
             const params = new URLSearchParams({ vrm: vehicle.vrm });
             // Pass make/model/year so API can use as fallback if no competitorUrl
-            if (vehicle.make) params.set('make', vehicle.make);
-            if (vehicle.model) params.set('model', vehicle.model);
+            if (vehicle.make) params.set('make', textValue(vehicle.make));
+            if (vehicle.model) params.set('model', textValue(vehicle.model));
             if (vehicle.year) params.set('year', String(vehicle.year));
             if (filters.fuelType) params.set('fuelType', filters.fuelType);
             if (filters.trim) params.set('trim', filters.trim);
@@ -608,15 +682,6 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
             if (filters.minYear) params.set('minYear', filters.minYear);
             if (filters.maxYear) params.set('maxYear', filters.maxYear);
             if (filters.condition) params.set('condition', filters.condition);
-            const cleanPostcode = postcode.trim().toUpperCase().replace(/\s+/g, ' ');
-            if (cleanPostcode) params.set('postcode', cleanPostcode);
-            const radiusMap: Record<string, string> = {
-                'Within 10 Miles': '10', 'Within 25 Miles': '25',
-                'Within 50 Miles': '50', 'Within 100 Miles': '100',
-                'Within 250 Miles': '250', 'National': '0',
-            };
-            // Only send distance if postcode is provided (AT API requires postcode with distance)
-            if (filters.distance && cleanPostcode) params.set('distance', radiusMap[filters.distance] || '250');
             // Auto-search uses a smaller pool (25); manual Search button fetches full pool
             params.set('pageSize', String(limit ?? FETCH_RESULTS_TARGET));
 
@@ -624,13 +689,11 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
                 credentials: 'include',
             });
             const data = await res.json();
-            console.log('[Competitors] API response:', JSON.stringify(data).slice(0, 500));
             if (data.ok) {
                 setResults(data.competitors || []);
                 setTotal(data.total || 0);
                 setIsSampleData(!!data.capabilityError);
                 if (data.warning) setWarning(data.warning);
-                if (data._debug) console.log('[Competitors] Debug:', data._debug);
             } else {
                 setError(data.error?.message || 'Failed to load competitors.');
             }
@@ -645,8 +708,8 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
         if (!vehicle?.vrm) return;
         try {
             const params = new URLSearchParams({ vrm: vehicle.vrm });
-            if (vehicle.make) params.set('make', vehicle.make);
-            if (vehicle.model) params.set('model', vehicle.model);
+            if (vehicle.make) params.set('make', textValue(vehicle.make));
+            if (vehicle.model) params.set('model', textValue(vehicle.model));
             if (vehicle.year) params.set('year', String(vehicle.year));
             params.set('pageSize', '150');
             const res = await fetch(`/api/vehicles/competitors?${params.toString()}`, { credentials: 'include' });
@@ -657,14 +720,14 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
 
     const autoSearchedVrmRef = useRef<string | null>(null);
 
-    // Auto-search once when tab opens (or VRM changes) — filters re-run only on Search button click
+    // Auto-search once when tab opens
     useEffect(() => {
         const vrm = String(vehicle?.vrm || '').toUpperCase().replace(/\s/g, '');
         if (!vrm) return;
         if (autoSearchedVrmRef.current === vrm) return;
         autoSearchedVrmRef.current = vrm;
-        doSearch(25); // initial auto-search: lightweight 25-result preview
-        fetchFilterPool(); // background: fetch larger pool for accurate filter options
+        doSearch(25);
+        fetchFilterPool();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [vehicle?.vrm]);
 
@@ -718,11 +781,11 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
     );
 
     const exportCSV = () => {
-        const headers = ['Registration', 'Price', 'Valuation', 'Price vs Val %', 'Trim', 'Derivative', 'Engine', 'Fuel', 'Mileage', 'Days on Forecourt', 'Distance'];
+        const headers = ['Registration', 'Price', 'Valuation', 'Price vs Val %', 'Trim', 'Derivative', 'Engine', 'Fuel', 'Transmission', 'Mileage', 'Days on Forecourt', 'Distance'];
         const rows = sorted.map(r => [
             r.registration, r.price ?? '', r.valuation ?? '',
             r.price && r.valuation ? Math.round((r.price / r.valuation) * 100) : '',
-            r.trim, r.derivative, r.engine, r.fuelType,
+            r.trim, r.derivative, r.engine, r.fuelType, r.transmission ?? '',
             r.mileage ?? '', r.daysOnForecourt ?? '', r.distance ? `${r.distance} miles` : '',
         ]);
         const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
@@ -810,11 +873,11 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
                     <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-[#4D7CFF] mb-1">Manufacturer</label>
-                        <input readOnly value={vehicle?.make || ''} className="w-full px-2.5 py-1.5 bg-slate-50 border border-[#E2E8F0] rounded text-[12px] text-slate-600 cursor-not-allowed" />
+                        <input readOnly value={textValue(vehicle?.make)} className="w-full px-2.5 py-1.5 bg-slate-50 border border-[#E2E8F0] rounded text-[12px] text-slate-600 cursor-not-allowed" />
                     </div>
                     <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-[#4D7CFF] mb-1">Model</label>
-                        <input readOnly value={vehicle?.model || ''} className="w-full px-2.5 py-1.5 bg-slate-50 border border-[#E2E8F0] rounded text-[12px] text-slate-600 cursor-not-allowed" />
+                        <input readOnly value={textValue(vehicle?.model)} className="w-full px-2.5 py-1.5 bg-slate-50 border border-[#E2E8F0] rounded text-[12px] text-slate-600 cursor-not-allowed" />
                     </div>
                     <FilterInput label="Trim" field="trim" type="select" options={selectOptions.trim} />
                     <div>
@@ -902,36 +965,6 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
                         </div>
                     </div>
                     <FilterInput label="Condition" field="condition" type="select" options={selectOptions.condition} />
-                    {/* Postcode + Distance grouped */}
-                    <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#4D7CFF] mb-1">Location</label>
-                        <div className="flex items-center gap-1">
-                            <div className="relative flex-1">
-                                <input
-                                    type="text"
-                                    value={postcode}
-                                    onChange={e => setPostcode(e.target.value)}
-                                    placeholder="Postcode"
-                                    maxLength={8}
-                                    className="w-full px-2.5 py-1.5 bg-white border border-[#E2E8F0] rounded text-[12px] text-slate-700 uppercase placeholder-slate-400 focus:outline-none focus:border-[#4D7CFF] focus:ring-1 focus:ring-[#4D7CFF] shadow-sm"
-                                />
-                            </div>
-                            <select
-                                value={filters.distance}
-                                onChange={e => setFilters(p => ({ ...p, distance: e.target.value }))}
-                                disabled={!postcode.trim()}
-                                title={!postcode.trim() ? 'Enter a postcode first' : undefined}
-                                className="w-28 flex-shrink-0 px-2 py-1.5 bg-white border border-[#E2E8F0] rounded text-[12px] text-slate-700 focus:outline-none focus:border-[#4D7CFF] shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {DISTANCE_OPTIONS.map((o, i) => (
-                                    <option key={i} value={o}>{o || 'Any'}</option>
-                                ))}
-                            </select>
-                        </div>
-                        {!postcode.trim() && (
-                            <p className="text-[10px] text-slate-400 mt-1">Enter postcode to filter by distance</p>
-                        )}
-                    </div>
                 </div>
 
                 <div className="flex justify-end">
@@ -1054,6 +1087,7 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
                                             { col: 'derivative', label: 'DERIVATIVE' },
                                             { col: 'engine', label: 'ENGINE' },
                                             { col: 'fuelType', label: 'FUEL' },
+                                            { col: 'transmission', label: 'TRANSMISSION' },
                                             { col: 'optionalExtrasCount', label: 'OPTIONS' },
                                             { col: 'fullDealershipHistory', label: 'FULL DEALER HISTORY' },
                                             { col: 'daysOnForecourt', label: 'DAYS ON FORECOURT' },
@@ -1140,10 +1174,11 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
                                                         <span className="font-bold text-[11px]" style={{ color: barColor }}>{pct != null ? `${pct}%` : '—'}</span>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.trim}</td>
-                                                <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate" title={row.derivative}>{row.derivative}</td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{textValue(row.trim)}</td>
+                                                <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate" title={textValue(row.derivative)}>{textValue(row.derivative)}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.engine}</td>
-                                                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.fuelType}</td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{textValue(row.fuelType)}</td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-slate-600">{textValue(row.transmission)}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.optionalExtrasCount ?? 0}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.fullDealershipHistory ? 'Yes' : 'No'}</td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{row.daysOnForecourt ?? '—'}</td>
@@ -2032,7 +2067,7 @@ function VehicleCheckTab({ vehicle, checkData, checkLoading, checkError, checkLo
         if (isPreMarch2001 && engineCC) {
             annual = engineCC <= 1549 ? 200 : 325;
         } else if (isPostApril2017) {
-            annual = 190;
+            annual = 200;
         } else if (co2 != null) {
             const bands: [number, number, number][] = [
                 [0, 100, 0], [101, 110, 20], [111, 120, 35], [121, 130, 165],
@@ -2503,7 +2538,7 @@ function VehicleCheckTab({ vehicle, checkData, checkLoading, checkError, checkLo
 
 /* ─── HistoryTab Component ──────────────────────────────────────────────── */
 const CONDITION_OPTIONS = ['Excellent', 'Good', 'Fair', 'Poor'];
-const SERVICE_HISTORY_OPTIONS = ['Full Service History', 'Part Service History', 'No Service History', 'Not Applicable'];
+const SERVICE_HISTORY_OPTIONS = ['Full service history', 'Full dealership history', 'Part service history', 'No service history'];
 
 function calcWarrantyExpiry(regDate: string | undefined, months: number | string): string {
     if (!regDate || !months) return '';
@@ -2527,17 +2562,19 @@ function HistoryTab({
     vehicle,
     saving,
     onSave,
+    onVinFound,
 }: {
     vehicle: VehicleDetail;
     saving: boolean;
     onSave: (fields: Record<string, any>) => void;
+    onVinFound?: (vin: string, engineNumber?: string) => void;
 }) {
     // Local state mirrors all history fields
     const [fields, setFields] = useState({
         previousOwners:          vehicle.previousOwners ?? '',
         numberOfKeys:            vehicle.numberOfKeys ?? '',
         v5Present:               vehicle.v5Present ?? true,
-        year:                    vehicle.year ?? '',
+        year:                    vehicle.year || ((vehicle as any).dateOfRegistration ? new Date((vehicle as any).dateOfRegistration).getFullYear() : '') || '',
         condition:               vehicle.condition ?? 'Used',
         interiorCondition:       vehicle.interiorCondition ?? '',
         exteriorCondition:       vehicle.exteriorCondition ?? '',
@@ -2618,6 +2655,15 @@ function HistoryTab({
 
                     return next;
                 });
+                // VIN + Engine Number — propagate to parent if not already saved
+                const vinFromCheck = d.vehicle?.vin || d.vin || '';
+                const engFromCheck = d.vehicle?.engineNumber || '';
+                const missingVin = !vehicle.vin && !!vinFromCheck;
+                const missingEng = !vehicle.engineNumber && !!engFromCheck;
+                if (onVinFound && (missingVin || missingEng)) {
+                    onVinFound(missingVin ? vinFromCheck : '', missingEng ? engFromCheck : undefined);
+                }
+
                 setAtFilled(true);
             })
             .catch(() => {}); // silently fail — fields stay blank
@@ -3070,7 +3116,7 @@ function OptionsTab({
     editDescription2, setEditDescription2,
     editFeatures, setEditFeatures,
     saving, onSave,
-    vehicleMake, vehicleFeatures, vehicleVrm,
+    vehicleMake, vehicleFeatures, vehicleVrm, vehicleInfo,
     atOptions,
     atStdFeatures,
     atFactoryFitted,
@@ -3101,6 +3147,7 @@ function OptionsTab({
     atHasData: boolean;
     editCustomFeatures: string[];
     setEditCustomFeatures: React.Dispatch<React.SetStateAction<string[]>>;
+    vehicleInfo?: { mileage?: number; bhp?: number; year?: number; derivative?: string; ulezCompliant?: boolean };
 }) {
     type ATOption = { name: string; price: number | null; fitted: boolean; category: string };
     const [factoryFitApplied, setFactoryFitApplied] = useState(false);
@@ -3231,19 +3278,140 @@ function OptionsTab({
 
     const [isAutoDescribing, setIsAutoDescribing] = useState<string | null>(null);
     const [quickInsertOpen, setQuickInsertOpen] = useState(false);
+    const [showAgModal, setShowAgModal] = useState(false);
+    const [agCapitalise, setAgCapitalise] = useState(true);
+    const [agUseCommas, setAgUseCommas] = useState(false);
+    const [agCompact, setAgCompact] = useState(false);
+    const [showLagModal, setShowLagModal] = useState(false);
+    const [lagCapitalise, setLagCapitalise] = useState(false);
+    const [lagUseCommas, setLagUseCommas] = useState(false);
+    const [lagCompact, setLagCompact] = useState(false);
+    const [doneField, setDoneField] = useState<'short' | 'long' | 'web' | null>(null);
 
+    const markDone = (field: 'short' | 'long' | 'web') => {
+        setDoneField(field);
+        setTimeout(() => setDoneField(null), 3000);
+    };
 
+    // Short AG suggestions — abbreviated tokens, greedy fill up to 30 chars
+    const agSuggestions = useMemo(() => {
+        const abbrevMap: [string, string][] = [
+            ['apple carplay', 'CARPLAY'], ['carplay', 'CARPLAY'],
+            ['android auto', 'AND AUTO'],
+            ['adaptive cruise control', 'ADAPT CRUISE'], ['cruise control', 'CRUISE CTRL'],
+            ['full service history', 'FSH'], ['service history', 'SERV HIST'],
+            ['satellite navigation', 'SAT NAV'], ['satnav', 'SAT NAV'], ['sat nav', 'SAT NAV'], ['navigation', 'NAV'],
+            ['parking sensors', 'PARK SENS'], ['park assist', 'PARK ASST'],
+            ['panoramic roof', 'PAN ROOF'], ['panoramic sunroof', 'PAN ROOF'], ['sunroof', 'SUNROOF'],
+            ['heated seats', 'HTD SEATS'], ['heated front seats', 'HTD SEATS'],
+            ['leather seats', 'LEATHER'], ['leather upholstery', 'LEATHER'],
+            ['dab radio', 'DAB'], ['bluetooth', 'BLUETOOTH'],
+            ['reverse camera', 'REV CAM'], ['rear camera', 'REV CAM'], ['reversing camera', 'REV CAM'],
+            ['head up display', 'HUD'], ['head-up display', 'HUD'],
+            ['alloy wheels', 'ALLOYS'], ['keyless entry', 'KEYLESS'], ['keyless start', 'KEYLESS'],
+            ['lane assist', 'LANE ASST'], ['blind spot', 'BLIND SPOT'],
+            ['wireless charging', 'WIRELESS'], ['power tailgate', 'PWR GATE'],
+        ];
+        const sep = agCompact ? '|' : agUseCommas ? ', ' : ' | ';
+        const featureTokens: string[] = [];
+        Object.entries(checked).filter(([_, v]) => v).forEach(([feat]) => {
+            const lower = feat.toLowerCase();
+            for (const [key, abbrev] of abbrevMap) {
+                if (lower.includes(key)) { if (!featureTokens.includes(abbrev)) featureTokens.push(abbrev); return; }
+            }
+        });
+        const dataTokens: string[] = [];
+        if (vehicleInfo?.bhp) dataTokens.push(`${vehicleInfo.bhp} BHP`);
+        if (vehicleInfo?.mileage) dataTokens.push(`${vehicleInfo.mileage.toLocaleString()} MI`);
+        if (vehicleInfo?.ulezCompliant) dataTokens.push('ULEZ');
+        if (vehicleInfo?.derivative) { const tok = vehicleInfo.derivative.split(' ')[0]?.toUpperCase(); if (tok && tok.length > 2) dataTokens.push(tok); }
+        const allTokens = [...featureTokens, ...dataTokens];
+        if (allTokens.length < 3) { ['FSH','SAT NAV','BLUETOOTH','ALLOYS','HTD SEATS','CRUISE CTRL','DAB','PARK SENS'].forEach(f => { if (!allTokens.includes(f)) allTokens.push(f); }); }
+        const applyCase = (s: string) => agCapitalise ? s.toUpperCase() : s;
+        const results: string[] = [];
+        const seen = new Set<string>();
+        const tryAdd = (toks: string[]) => {
+            if (toks.length < 2) return;
+            const s = applyCase(toks.join(sep));
+            if (s.length <= 30 && !seen.has(s)) { seen.add(s); results.push(s); }
+        };
+        // Greedy: for each start, take as many tokens as fit within 30 chars
+        for (let start = 0; start < allTokens.length && results.length < 8; start++) {
+            const combo: string[] = [];
+            for (let j = start; j < allTokens.length; j++) {
+                const candidate = applyCase([...combo, allTokens[j]].join(sep));
+                if (candidate.length <= 30) combo.push(allTokens[j]); else break;
+            }
+            tryAdd(combo);
+            if (combo.length > 2) tryAdd([...combo].reverse());
+            if (combo.length > 3) tryAdd(combo.slice(0, -1));
+        }
+        return results;
+    }, [checked, vehicleInfo, agCapitalise, agUseCommas, agCompact]);
 
-    const handleAutoDescribe = (target: 'short' | 'long' | 'web') => {
+    // Long AG suggestions — full words, greedy fill up to 70 chars
+    const lagSuggestions = useMemo(() => {
+        const fullMap: [string, string][] = [
+            ['apple carplay', 'Apple CarPlay'], ['carplay', 'Apple CarPlay'],
+            ['android auto', 'Android Auto'],
+            ['adaptive cruise control', 'Adaptive Cruise Control'], ['cruise control', 'Cruise Control'],
+            ['full service history', 'Full Service History'], ['service history', 'Service History'],
+            ['satellite navigation', 'Satellite Navigation'], ['satnav', 'Sat Nav'], ['sat nav', 'Sat Nav'], ['navigation', 'Navigation'],
+            ['parking sensors', 'Parking Sensors'], ['park assist', 'Park Assist'],
+            ['panoramic roof', 'Panoramic Roof'], ['panoramic sunroof', 'Panoramic Roof'], ['sunroof', 'Sunroof'],
+            ['heated seats', 'Heated Seats'], ['heated front seats', 'Heated Seats'],
+            ['leather seats', 'Leather Seats'], ['leather upholstery', 'Leather Seats'],
+            ['dab radio', 'DAB Radio'], ['bluetooth', 'Bluetooth'],
+            ['reverse camera', 'Reverse Camera'], ['rear camera', 'Reverse Camera'], ['reversing camera', 'Reverse Camera'],
+            ['head up display', 'Head Up Display'], ['head-up display', 'Head Up Display'],
+            ['alloy wheels', 'Alloys'], ['keyless entry', 'Keyless Entry'], ['keyless start', 'Keyless Start'],
+            ['lane assist', 'Lane Assist'], ['blind spot', 'Blind Spot Monitoring'],
+            ['wireless charging', 'Wireless Charging'], ['power tailgate', 'Power Tailgate'],
+        ];
+        const sep = lagCompact ? '|' : lagUseCommas ? ', ' : ' | ';
+        const featureTokens: string[] = [];
+        Object.entries(checked).filter(([_, v]) => v).forEach(([feat]) => {
+            const lower = feat.toLowerCase();
+            for (const [key, full] of fullMap) {
+                if (lower.includes(key)) { if (!featureTokens.includes(full)) featureTokens.push(full); return; }
+            }
+        });
+        const dataTokens: string[] = [];
+        if (vehicleInfo?.derivative) dataTokens.push(vehicleInfo.derivative);
+        if (vehicleInfo?.bhp) dataTokens.push(`${vehicleInfo.bhp} BHP`);
+        if (vehicleInfo?.mileage) dataTokens.push(`${vehicleInfo.mileage.toLocaleString()} Miles`);
+        if (vehicleInfo?.ulezCompliant) dataTokens.push('ULEZ Compliant');
+        const allTokens = [...featureTokens, ...dataTokens];
+        if (allTokens.length < 4) { ['Cruise Control','Satellite Navigation','Bluetooth','Alloys','Heated Seats','DAB Radio','Parking Sensors','Reverse Camera'].forEach(f => { if (!allTokens.includes(f)) allTokens.push(f); }); }
+        const applyCase = (s: string) => lagCapitalise ? s.toUpperCase() : s;
+        const results: string[] = [];
+        const seen = new Set<string>();
+        const tryAdd = (toks: string[]) => {
+            if (toks.length < 3) return;
+            const s = applyCase(toks.join(sep));
+            if (s.length <= 70 && !seen.has(s)) { seen.add(s); results.push(s); }
+        };
+        for (let start = 0; start < allTokens.length && results.length < 8; start++) {
+            const combo: string[] = [];
+            for (let j = start; j < allTokens.length; j++) {
+                const candidate = applyCase([...combo, allTokens[j]].join(sep));
+                if (candidate.length <= 70) combo.push(allTokens[j]); else break;
+            }
+            tryAdd(combo);
+            if (combo.length > 3) tryAdd([...combo].reverse());
+            if (combo.length > 4) tryAdd(combo.slice(0, -1));
+            if (combo.length > 4) tryAdd(combo.slice(1));
+        }
+        return results;
+    }, [checked, vehicleInfo, lagCapitalise, lagUseCommas, lagCompact]);
+
+    const handleAutoDescribe = (target: 'web') => {
         setIsAutoDescribing(target);
         setTimeout(() => {
-            if (target === 'short') setEditAttentionGrabber('Premium Audio, Sat Nav, FSH');
-            if (target === 'long') setEditLongAttentionGrabber('Audi A3 with Satellite Navigation, Bluetooth and 17in Alloy Wheels');
-            if (target === 'web') {
-                const checkedList = Object.entries(checked).filter(([_, v]) => v).map(([k]) => `• ${k}`).join('\n');
-                setEditDescription(`Beautiful Mythos Black Audi A3 with a full service history and long MOT.\n\nKey features include:\n${checkedList}`);
-            }
+            const checkedList = Object.entries(checked).filter(([_, v]) => v).map(([k]) => `• ${k}`).join('\n');
+            setEditDescription(`Beautiful ${vehicleMake || ''} with a full service history and long MOT.\n\nKey features include:\n${checkedList}`);
             setIsAutoDescribing(null);
+            markDone(target);
         }, 1500);
     };
 
@@ -3662,12 +3830,12 @@ function OptionsTab({
                         </div>
                     </div>
                     <button
-                        onClick={() => handleAutoDescribe('short')}
-                        disabled={isAutoDescribing === 'short'}
-                        className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-[11px] font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
+                        onClick={() => setShowAgModal(true)}
+                        className={`px-3 py-1.5 rounded text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${doneField === 'short' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
-                        {isAutoDescribing === 'short' && <div className="w-3 h-3 border-2 border-[#4D7CFF] border-t-transparent rounded-full animate-spin" />}
-                        Auto-Describe
+                        {doneField === 'short' ? (
+                            <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Done!</>
+                        ) : 'Auto-Describe'}
                     </button>
                 </div>
                 <input
@@ -3693,12 +3861,10 @@ function OptionsTab({
                         </svg>
                     </div>
                     <button
-                        onClick={() => handleAutoDescribe('long')}
-                        disabled={isAutoDescribing === 'long'}
-                        className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-[11px] font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
+                        onClick={() => setShowLagModal(true)}
+                        className={`px-3 py-1.5 rounded text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${doneField === 'long' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
-                        {isAutoDescribing === 'long' && <div className="w-3 h-3 border-2 border-[#4D7CFF] border-t-transparent rounded-full animate-spin" />}
-                        Auto-Describe
+                        {doneField === 'long' ? <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Done!</> : 'Auto-Describe'}
                     </button>
                 </div>
                 <input
@@ -3726,11 +3892,9 @@ function OptionsTab({
                         <button
                             onClick={() => handleAutoDescribe('web')}
                             disabled={isAutoDescribing === 'web'}
-                            className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-[11px] font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
+                            className={`px-3 py-1.5 rounded text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${doneField === 'web' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
-                            {isAutoDescribing === 'web' && <div className="w-3 h-3 border-2 border-[#4D7CFF] border-t-transparent rounded-full animate-spin" />}
-                            Auto-Describe
-                            <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                            {isAutoDescribing === 'web' ? <div className="w-3 h-3 border-2 border-[#4D7CFF] border-t-transparent rounded-full animate-spin" /> : doneField === 'web' ? <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Done!</> : 'Auto-Describe'}
                         </button>
                         <div className="relative">
                             <button
@@ -3840,6 +4004,100 @@ function OptionsTab({
                     Save &amp; Next →
                 </button>
             </div>
+
+            {/* Attention Grabber Modal */}
+            {showAgModal && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={() => setShowAgModal(false)}>
+                    <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
+                    <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-5">
+                            <h3 className="text-[15px] font-bold text-slate-800">Choose Short Attention Grabber</h3>
+                            <button onClick={() => setShowAgModal(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-[14px] transition-colors">✕</button>
+                        </div>
+                        <div className="space-y-2 mb-5">
+                            {agSuggestions.length === 0 ? (
+                                <p className="text-[12px] text-slate-400 text-center py-4">No suggestions — add vehicle features and check them first.</p>
+                            ) : agSuggestions.map((s, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => {
+                                        setEditAttentionGrabber(s);
+                                        setShowAgModal(false);
+                                        markDone('short');
+                                    }}
+                                    className="w-full px-4 py-3 border-2 border-[#E2E8F0] rounded-lg text-[13px] font-bold text-[#4D7CFF] hover:border-[#4D7CFF] hover:bg-blue-50 transition-all text-center"
+                                >
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-5 py-3 border-t border-[#E2E8F0]">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={agCapitalise} onChange={e => setAgCapitalise(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Capitalise</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={agUseCommas} onChange={e => setAgUseCommas(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Use Commas</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={agCompact} onChange={e => setAgCompact(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Compact</span>
+                            </label>
+                        </div>
+                        <div className="flex justify-end mt-4">
+                            <button onClick={() => setShowAgModal(false)} className="px-5 py-2 bg-slate-200 text-slate-700 rounded-lg text-[12px] font-semibold hover:bg-slate-300 transition-colors">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Long Attention Grabber Modal */}
+            {showLagModal && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={() => setShowLagModal(false)}>
+                    <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
+                    <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-5">
+                            <h3 className="text-[15px] font-bold text-slate-800">Choose Long Attention Grabber</h3>
+                            <button onClick={() => setShowLagModal(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-[14px] transition-colors">✕</button>
+                        </div>
+                        <div className="space-y-2 mb-5">
+                            {lagSuggestions.length === 0 ? (
+                                <p className="text-[12px] text-slate-400 text-center py-4">No suggestions — add vehicle features and check them first.</p>
+                            ) : lagSuggestions.map((s, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => {
+                                        setEditLongAttentionGrabber(s);
+                                        setShowLagModal(false);
+                                        markDone('long');
+                                    }}
+                                    className="w-full px-4 py-3 border-2 border-[#E2E8F0] rounded-lg text-[13px] font-bold text-[#4D7CFF] hover:border-[#4D7CFF] hover:bg-blue-50 transition-all text-center"
+                                >
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-5 py-3 border-t border-[#E2E8F0]">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={lagCapitalise} onChange={e => setLagCapitalise(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Capitalise</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={lagUseCommas} onChange={e => setLagUseCommas(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Use Commas</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={lagCompact} onChange={e => setLagCompact(e.target.checked)} className="w-4 h-4 accent-[#4D7CFF]" />
+                                <span className="text-[12px] text-slate-600">Compact</span>
+                            </label>
+                        </div>
+                        <div className="flex justify-end mt-4">
+                            <button onClick={() => setShowLagModal(false)} className="px-5 py-2 bg-slate-200 text-slate-700 rounded-lg text-[12px] font-semibold hover:bg-slate-300 transition-colors">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Help Drawer */}
             {showHelpDrawer && (
@@ -3985,6 +4243,26 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [newFeature, setNewFeature] = useState('');
     // Pending tags (manual save)
     const [pendingTags, setPendingTags] = useState<string[]>([]);
+    const [workflowStages, setWorkflowStages] = useState<Record<string, { completed: boolean; date: string; notes: string }>>({});
+    const [spValuation, setSpValuation] = useState<any>(null);
+    const [spValuationLoading, setSpValuationLoading] = useState(false);
+    const [spValuationError, setSpValuationError] = useState('');
+    const [spShowTrend, setSpShowTrend] = useState(false);
+    const [spShowProfit, setSpShowProfit] = useState(false);
+    const [showFundingProvider, setShowFundingProvider] = useState(false);
+    const [addCostTab, setAddCostTab] = useState<'invoice' | 'without'>('without');
+    const [newCostFields, setNewCostFields] = useState({ category: '', date: '', supplier: '', reference: '', cost: '', vatRate: '20' });
+    const [vehicleAdditionalCosts, setVehicleAdditionalCosts] = useState<any[]>([]);
+    const [expandedCosts, setExpandedCosts] = useState<Record<string, boolean>>({});
+
+    // Taxonomy cascade
+    const [taxMakes, setTaxMakes] = useState<{makeId: string; name: string}[]>([]);
+    const [taxModels, setTaxModels] = useState<{modelId: string; name: string}[]>([]);
+    const [taxGenerations, setTaxGenerations] = useState<{generationId: string; name: string}[]>([]);
+    const [taxTrims, setTaxTrims] = useState<string[]>([]);
+    const [taxMakeId, setTaxMakeId] = useState('');
+    const [taxModelId, setTaxModelId] = useState('');
+    const [taxGenerationId, setTaxGenerationId] = useState('');
 
     const updateField = (field: keyof VehicleDetail, value: any) => {
         setEditFields(prev => ({ ...prev, [field]: value }));
@@ -4082,6 +4360,119 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
             </div>
         </div>
     );
+
+    // Auto-fill missing fields from AT derivative technical data when vehicle has a derivativeId
+    useEffect(() => {
+        if (!vehicle) return;
+        const derivId = (vehicle as any).derivativeId;
+        if (!derivId) return;
+        const needsFill = !vehicle.engineSize || !vehicle.fuelType || !vehicle.seats || !vehicle.doors;
+        if (!needsFill) return;
+        fetch(`/api/vehicles/derivatives?id=${derivId}`)
+            .then(r => r.json())
+            .then(data => {
+                const d = data.derivative;
+                if (!d) return;
+                setEditFields(prev => ({
+                    ...prev,
+                    ...(!prev.engineSize && (d.badgeEngineSizeLitres || d.engineCapacityCC) ? { engineSize: d.badgeEngineSizeLitres ? String(d.badgeEngineSizeLitres) : String((d.engineCapacityCC / 1000).toFixed(1)) } : {}),
+                    ...(!prev.fuelType && d.fuelType ? { fuelType: d.fuelType } : {}),
+                    ...(!prev.seats && d.seats ? { seats: d.seats } : {}),
+                    ...(!prev.doors && d.doors ? { doors: d.doors } : {}),
+                    ...(!prev.transmission && d.transmissionType ? { transmission: d.transmissionType } : {}),
+                    ...(!prev.bodyType && d.bodyType ? { bodyType: d.bodyType } : {}),
+                    ...(!prev.drivetrain && d.drivetrain ? { drivetrain: d.drivetrain } : {}),
+                    ...(!prev.trim && d.trim ? { trim: d.trim } : {}),
+                }));
+            })
+            .catch(() => {});
+    }, [vehicle]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Fetch makes whenever vehicleType changes (or on mount with default 'Car').
+    // This ensures Van/Bike/etc makes load correctly when type is set.
+    useEffect(() => {
+        const vt = (editFields.vehicleType as string) || 'Car';
+        fetch(`/api/vehicles/taxonomy?resource=makes&vehicleType=${encodeURIComponent(vt)}`)
+            .then(r => r.json()).then(d => setTaxMakes(d.makes || [])).catch(() => {});
+        // Reset downstream cascade when type changes
+        setTaxModels([]); setTaxGenerations([]); setTaxTrims([]);
+        setTaxModelId(''); setTaxGenerationId('');
+    }, [editFields.vehicleType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Once makes list loads + vehicle has a make, cascade-init the full chain.
+    // Depends on both taxMakes (populated above) AND editFields.make (populated
+    // after vehicle fetch) so that whichever arrives last triggers the cascade.
+    useEffect(() => {
+        if (!taxMakes.length || !editFields.make) return;
+        // Capture current field values to avoid stale closure inside async callbacks
+        const currentMakeName = editFields.make as string;
+        const currentModelName = editFields.model as string;
+        const currentGenName = editFields.generation as string;
+        const currentVehicleType = (editFields.vehicleType as string) || 'Car';
+
+        const make = taxMakes.find((m: any) => m.name === currentMakeName);
+        if (!make) return;
+        setTaxMakeId(make.makeId);
+        fetch(`/api/vehicles/taxonomy?resource=models&makeId=${make.makeId}&vehicleType=${encodeURIComponent(currentVehicleType)}`)
+            .then(r => r.json())
+            .then(async d => {
+                const models = d.models || [];
+                setTaxModels(models);
+                if (!currentModelName) return;
+                const model = models.find((m: any) => m.name === currentModelName);
+                if (!model) return;
+                setTaxModelId(model.modelId);
+                const gRes = await fetch(`/api/vehicles/taxonomy?resource=generations&modelId=${model.modelId}`);
+                const gData = await gRes.json();
+                const gens = gData.generations || [];
+                setTaxGenerations(gens);
+                
+                let gen = currentGenName ? gens.find((g: any) => g.name === currentGenName) : null;
+                
+                // --- AUTO-SELECT GENERATION ---
+                // If no generation was set explicitly, try to guess it from the vehicle's year
+                const vehicleYear = editFields.year ? Number(editFields.year) : undefined;
+                if (!gen && vehicleYear && !isNaN(vehicleYear)) {
+                    gen = gens.find((g: any) => {
+                        const match = g.name.match(/(\d{4})\s*-\s*(\d{4}|present|)/i);
+                        if (match) {
+                            const start = parseInt(match[1]);
+                            const end = match[2] && match[2].toLowerCase() !== 'present' ? parseInt(match[2]) : new Date().getFullYear() + 1;
+                            return vehicleYear >= start && vehicleYear <= end;
+                        }
+                        return false;
+                    });
+                    if (gen) {
+                        setEditFields(prev => ({ ...prev, generation: gen.name }));
+                    }
+                }
+
+                if (!gen) return;
+                setTaxGenerationId(gen.generationId);
+
+                const tRes = await fetch(`/api/vehicles/taxonomy?resource=trims&generationId=${gen.generationId}`);
+                const tData = await tRes.json();
+                const trims = (tData.trims || []).map((t: any) => t.name).filter((n: any) => typeof n === 'string' && n.length > 0);
+                setTaxTrims(trims);
+                
+                // --- AUTO-SELECT TRIM ---
+                // If no trim is set, try to guess it from the derivative string
+                const currentTrimName = editFields.trim as string;
+                const currentDerivative = editFields.derivative as string;
+                if (!currentTrimName && currentDerivative && trims.length > 0) {
+                    const derivUpper = currentDerivative.toUpperCase();
+                    // Sort by length desc so longer trims (e.g. "S Line Black Edition") match before shorter substrings ("S Line")
+                    const sortedTrims = [...trims].sort((a, b) => b.length - a.length);
+                    const matchedTrim = sortedTrims.find(t => derivUpper.includes(t.toUpperCase()));
+                    if (matchedTrim) {
+                        setEditFields(prev => ({ ...prev, trim: matchedTrim }));
+                    }
+                }
+            })
+            .catch(() => {});
+    }, [taxMakes, editFields.make]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const dropdownClasses = `${inputClasses} appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M7%2010L12%2015L17%2010%22%20stroke%3D%22%2394A3B8%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:20px_20px] bg-[right_8px_center] bg-no-repeat pr-10`;
 
     // Images
     const [uploading, setUploading] = useState(false);
@@ -4253,6 +4644,14 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                         if (primary) rawFlatImages.push(primary);
                     }
 
+                    // Helper: coerce AT object fields like {name:"Petrol"} → "Petrol"
+                    const strVal = (x: any): string => {
+                        if (!x) return '';
+                        if (typeof x === 'string') return x;
+                        if (typeof x === 'object' && x.name) return String(x.name);
+                        return String(x);
+                    };
+
                     const vehicleData: VehicleDetail = {
                         ...v,
                         // Normalise status to our local values. AT cache may have stored 'Live'
@@ -4263,8 +4662,33 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             if (!s || s === 'Live' || s === 'LIVE' || s === 'FORECOURT' || s === 'PUBLISHED') return 'In Stock';
                             if (s === 'SOLD') return 'Sold';
                             if (s === 'SALE_IN_PROGRESS') return 'Reserved';
-                            return s; // Already a valid local status (In Stock / Draft / Reserved / Sold / For Sale)
+                            return typeof s === 'object' ? (s as any).name || 'In Stock' : s;
                         })(),
+                        // Normalise fields that AT may return as {name: "..."} objects
+                        make:         strVal(v.make),
+                        model:        strVal(v.model),
+                        derivative:   strVal(v.derivative),
+                        fuelType:     strVal(v.fuelType),
+                        transmission: strVal(v.transmission),
+                        bodyType:     strVal(v.bodyType),
+                        colour:       strVal(v.colour),
+                        engineSize:   strVal(v.engineSize),
+                        generation:   strVal(v.generation),
+                        trim:         strVal(v.trim),
+                        drivetrain:   strVal(v.drivetrain),
+                        vehicleType:  strVal(v.vehicleType),
+                        emissionClass: strVal(v.emissionClass),
+                        colourName:   strVal(v.colourName),
+                        exteriorFinish: strVal(v.exteriorFinish),
+                        interiorUpholstery: strVal(v.interiorUpholstery),
+                        driverPosition: strVal(v.driverPosition),
+                        condition:    strVal(v.condition),
+                        interiorCondition: strVal(v.interiorCondition),
+                        exteriorCondition: strVal(v.exteriorCondition),
+                        tyreCondition: strVal(v.tyreCondition),
+                        doors:        v.doors && typeof v.doors === 'object' ? Number((v.doors as any).name) : v.doors,
+                        seats:        v.seats && typeof v.seats === 'object' ? Number((v.seats as any).name) : v.seats,
+                        year:         v.year && typeof v.year === 'object' ? Number((v.year as any).name) : v.year,
                         vrm: v.vrm || v.vehicle?.registration || v.registration || '',
                         images: mediaImages.length > 0
                             ? mediaImages.map(m => m.href)
@@ -4283,8 +4707,68 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                         attentionGrabber: v.attentionGrabber || v.adverts?.retailAdverts?.attentionGrabber || '',
                         longAttentionGrabber: v.longAttentionGrabber || '',
                         customFeatures: (v.customFeatures || []).filter(Boolean),
+                        technicalSpecs: v.technicalSpecs || {},
+                        manualSpecs: v.manualSpecs || {},
                     };
                     setVehicle(vehicleData);
+
+                    // Auto-populate technicalSpecs for existing vehicles that predate the lookup-on-create fix.
+                    // Runs in the background — does NOT block page render.
+                    const savedSpecs = v.technicalSpecs || {};
+                    // Re-fetch if specs missing OR if sector/axles absent (added in a later version of the extractor)
+                    const specsIncomplete = !savedSpecs.sector || !savedSpecs.axles;
+                    const hasTechSpecs = Object.keys(savedSpecs).length > 0 && !specsIncomplete;
+                    const vrmForLookup = v.vrm || '';
+                    if (!hasTechSpecs && vrmForLookup && !id.startsWith('at-')) {
+                        fetch(`/api/vehicles/lookup?vrm=${encodeURIComponent(vrmForLookup)}`)
+                            .then(r => r.json())
+                            .then(lookupData => {
+                                if (!lookupData.ok) return;
+                                const specs = lookupData.vehicle?.technicalSpecs;
+                                if (!specs || Object.keys(specs).length === 0) return;
+                                // Persist to DB — also save vin if missing
+                                const vinFromLookup = lookupData.vehicle?.vin || '';
+                                const patchBody: Record<string, any> = { id: v._id || id, technicalSpecs: specs };
+                                if (!v.vin && vinFromLookup) patchBody.vin = vinFromLookup;
+                                fetch('/api/vehicles', {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(patchBody),
+                                });
+                                // Update local state so Specification tab re-renders immediately
+                                setVehicle(prev => prev ? {
+                                    ...prev,
+                                    technicalSpecs: specs,
+                                    ...(!prev.vin && vinFromLookup ? { vin: vinFromLookup } : {}),
+                                } : null);
+                                if (!v.vin && vinFromLookup) {
+                                    setEditFields(prev => ({ ...prev, vin: vinFromLookup }));
+                                }
+                            })
+                            .catch(() => {}); // Silently fail — specs are nice-to-have
+                    }
+                    // Auto-populate VIN + Engine Number via vehicle-check if either is missing
+                    if ((!v.vin || !v.engineNumber) && vrmForLookup && !id.startsWith('at-')) {
+                        fetch(`/api/vehicles/vehicle-check?vrm=${encodeURIComponent(vrmForLookup)}`)
+                            .then(r => r.json())
+                            .then(checkData => {
+                                const vinFromCheck = checkData?.vehicle?.vin || '';
+                                const engineNumberFromCheck = checkData?.vehicle?.engineNumber || '';
+                                const updates: Record<string, string> = {};
+                                if (!v.vin && vinFromCheck) updates.vin = vinFromCheck;
+                                if (!v.engineNumber && engineNumberFromCheck) updates.engineNumber = engineNumberFromCheck;
+                                if (!Object.keys(updates).length) return;
+                                fetch('/api/vehicles', {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id: v._id || id, ...updates }),
+                                });
+                                setVehicle(prev => prev ? { ...prev, ...updates } : null);
+                                setEditFields(prev => ({ ...prev, ...updates }));
+                            })
+                            .catch(() => {});
+                    }
+
                     setEditPrice(String(v.price || ''));
                     setEditForecourtPrice(String(v.forecourtPrice || ''));
                     setEditFields({
@@ -4310,6 +4794,31 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                         interiorUpholstery: vehicleData.interiorUpholstery || '',
                         purchasePrice: vehicleData.purchasePrice,
                         retailPrice: vehicleData.retailPrice,
+                        priceOnApplication: vehicleData.priceOnApplication || false,
+                        atPriceOnApplication: vehicleData.atPriceOnApplication || false,
+                        purchaseDate: vehicleData.purchaseDate || '',
+                        supplierName: vehicleData.supplierName || '',
+                        supplierInvoiceNo: vehicleData.supplierInvoiceNo || '',
+                        vatType: vehicleData.vatType || 'Margin',
+                        fundingProvider: vehicleData.fundingProvider || '',
+                        fundingAmount: vehicleData.fundingAmount,
+                        vin: vehicleData.vin || '',
+                        referenceId: vehicleData.referenceId || '',
+                        engineNumber: vehicleData.engineNumber || '',
+                        newKeeperReference: vehicleData.newKeeperReference || '',
+                        keyReference: vehicleData.keyReference || '',
+                        dueInDate: vehicleData.dueInDate || '',
+                        dateOnForecourt: vehicleData.dateOnForecourt || '',
+                        location: vehicleData.location || '',
+                        origin: vehicleData.origin || 'UK Vehicle',
+                        saleOrReturn: vehicleData.saleOrReturn || false,
+                        demonstrator: vehicleData.demonstrator || false,
+                        trade: vehicleData.trade || false,
+                        stockNotes: vehicleData.stockNotes || '',
+                        vatStatus: vehicleData.vatStatus || 'Marginal',
+                        reservePaymentAmount: vehicleData.reservePaymentAmount,
+                        quantityAvailable: vehicleData.quantityAvailable,
+                        dateInStock: vehicleData.dateInStock || '',
                         keyTags: vehicleData.keyTags || '',
                         serviceHistory: vehicleData.serviceHistory || 'Full',
                         previousOwners: vehicleData.history?.previousOwners || vehicleData.previousOwners || 1,
@@ -4321,6 +4830,15 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                     setEditFeatures(vehicleData.features);
                     setEditCustomFeatures(vehicleData.customFeatures || []);
                     setPendingTags(vehicleData.tags || []);
+                    setVehicleAdditionalCosts(vehicleData.vehicleAdditionalCosts || []);
+                    const defaultStages = ['purchased', 'inspected', 'valeted', 'photographed', 'advertised', 'readyForSale'];
+                    const savedStages = vehicleData.workflowStages || {};
+                    const mergedStages: Record<string, { completed: boolean; date: string; notes: string }> = {};
+                    defaultStages.forEach(s => {
+                        const saved = savedStages[s] || {};
+                        mergedStages[s] = { completed: (saved as any).completed ?? false, date: (saved as any).date ?? '', notes: (saved as any).notes ?? '' };
+                    });
+                    setWorkflowStages(mergedStages);
 
                     // Set uploaded images — include rawFlatImages too, extracting imageId from URL
                     // This prevents plain-URL AT images from being lost when saving
@@ -4493,7 +5011,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const handleSaveVehicleFields = () => {
         const payload = {
             ...editFields,
-            // Ensure numbers are converted properly
             year: Number(editFields.year) || undefined,
             mileage: Number(editFields.mileage) || undefined,
             seats: Number(editFields.seats) || undefined,
@@ -4501,15 +5018,16 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
             purchasePrice: Number(editFields.purchasePrice) || undefined,
             retailPrice: Number(editFields.retailPrice) || undefined,
             previousOwners: Number(editFields.previousOwners) || undefined,
+            fundingAmount: editFields.fundingAmount !== undefined ? Number(editFields.fundingAmount) || 0 : undefined,
             price: Number(editPrice),
             forecourtPrice: Number(editForecourtPrice) || undefined,
-            // Always include current status so "Save Updates" is a reliable save-all
             status: vehicle?.status || 'In Stock',
-            // Include pending tags — saved only on Save button click
             tags: pendingTags,
         };
         patchVehicle(payload);
     };
+
+    const handleSaveWorkflow = () => patchVehicle({ workflowStages });
     const handleSaveContent = () => patchVehicle({
         description: editDescription,
         description2: editDescription2,
@@ -4543,15 +5061,81 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     };
 
     const handleSaveChannels = async () => {
-        if (!vehicle) return;
-        const updates: Record<string, string> = {
-            atAdvertStatus: vehicle.atAdvertStatus || 'NOT_PUBLISHED',
-            advertiserAdvertStatus: vehicle.advertiserAdvertStatus || 'NOT_PUBLISHED',
-            locatorAdvertStatus: vehicle.locatorAdvertStatus || 'NOT_PUBLISHED',
-            exportAdvertStatus: vehicle.exportAdvertStatus || 'NOT_PUBLISHED',
-            profileAdvertStatus: vehicle.profileAdvertStatus || 'NOT_PUBLISHED',
-        };
-        await patchVehicle(updates);
+        if (!vehicle?.stockId) {
+            alert('No AutoTrader stock ID — create the stock record on AutoTrader first.');
+            return;
+        }
+        setSaving(true);
+        try {
+            // Send all 5 channels to AT in a single PATCH
+            const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    channels: {
+                        autotrader: vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
+                        advertiser: vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
+                        locator:    vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
+                        export:     vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
+                        profile:    vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
+                    },
+                }),
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Failed to update AT advertising');
+
+            // Update local state with actual AT-returned statuses (may be CAPPED/REJECTED)
+            const actual = data.actualStatuses || {};
+            const localUpdates: Record<string, string> = {
+                atAdvertStatus:         actual.atAdvertStatus         || vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
+                advertiserAdvertStatus: actual.advertiserAdvertStatus || vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
+                locatorAdvertStatus:    actual.locatorAdvertStatus    || vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
+                exportAdvertStatus:     actual.exportAdvertStatus     || vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
+                profileAdvertStatus:    actual.profileAdvertStatus    || vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
+            };
+
+            // Reflect actual statuses in UI immediately
+            setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
+
+            // Save actual statuses to local DB
+            await patchVehicle(localUpdates);
+
+            // Warn about CAPPED or REJECTED channels
+            if (data.warnings?.length > 0) {
+                const msgs = data.warnings.map((w: any) =>
+                    `${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`
+                ).join('\n');
+                alert(`Some channels could not be published:\n\n${msgs}`);
+            }
+        } catch (err: any) {
+            alert(err.message || 'Failed to update advertising channels');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleCreateAtStock = async () => {
+        if (!vehicle?._id && !vehicle?.id) return;
+        setSaving(true);
+        try {
+            const res = await fetch('/api/vehicles/autotrader-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vehicleId: vehicle._id || vehicle.id }),
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error?.message || 'Failed to create AutoTrader stock');
+            if (data.stockId) {
+                setVehicle(prev => prev ? { ...prev, stockId: data.stockId } : null);
+                toast.success('AutoTrader stock created successfully');
+            } else {
+                toast.success('Stock pushed to AutoTrader (no stockId returned yet — refresh to sync)');
+            }
+        } catch (err: any) {
+            toast.error(err.message || 'Failed to create AutoTrader stock');
+        } finally {
+            setSaving(false);
+        }
     };
 
     /* ─── Image Upload ─────────────────────────────────────────────────────── */
@@ -4743,12 +5327,12 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                     <div className="flex items-center gap-5 min-w-0">
                                         <div className="w-20 h-14 flex items-center justify-center shrink-0">
                                             <img
-                                                src={`https://vehapi.com/apis/logo-api/img/logo/${vehicle.make.toLowerCase().replace(/\s+/g, '-')}.png`}
-                                                alt={`${vehicle.make} logo`}
+                                                src={`https://vehapi.com/apis/logo-api/img/logo/${textValue(vehicle.make).toLowerCase().replace(/\s+/g, '-')}.png`}
+                                                alt={`${textValue(vehicle.make)} logo`}
                                                 className="w-full h-full object-contain"
                                                 onError={(e) => {
                                                     const target = e.currentTarget;
-                                                    const makeSlug = vehicle.make.toLowerCase().replace(/\s+/g, '');
+                                                    const makeSlug = textValue(vehicle.make).toLowerCase().replace(/\s+/g, '');
                                                     const fallbacks = [
                                                         `https://www.carlogos.org/car-logos/${makeSlug}-logo.png`,
                                                         `https://logo.clearbit.com/${makeSlug}.com`,
@@ -4761,23 +5345,23 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                         target.src = fallbacks[idx + 1];
                                                     } else {
                                                         target.style.display = 'none';
-                                                        target.parentElement!.innerHTML = `<span class="text-2xl font-black text-slate-300">${vehicle.make.charAt(0).toUpperCase()}</span>`;
+                                                        target.parentElement!.innerHTML = `<span class="text-2xl font-black text-slate-300">${textValue(vehicle.make).charAt(0).toUpperCase()}</span>`;
                                                     }
                                                 }}
                                             />
                                         </div>
                                         <div className="min-w-0">
                                             <h1 className="text-[17px] font-bold text-slate-800 leading-snug">
-                                                {vehicle.make} {vehicle.model} {vehicle.derivative}
+                                                {textValue(vehicle.make)} {textValue(vehicle.model)} {textValue(vehicle.derivative)}
                                             </h1>
                                             <div className="flex items-center flex-wrap gap-2 mt-1.5 text-[12px] font-medium text-slate-500">
                                                 <span>{vehicle.year}</span>
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                                                 <span>{vehicle.mileage ? `${vehicle.mileage.toLocaleString()} miles` : '0 miles'}</span>
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                                <span>{vehicle.fuelType || 'Unknown'}</span>
+                                                <span>{textValue(vehicle.fuelType) || 'Unknown'}</span>
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                                <span>{vehicle.transmission || 'Unknown'}</span>
+                                                <span>{textValue(vehicle.transmission) || 'Unknown'}</span>
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                                                 <span className="text-slate-800 font-bold">£{vehicle.price?.toLocaleString() || 'POA'}</span>
                                             </div>
@@ -5082,14 +5666,102 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
 
                                     {/* Manufacturer & Model */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                                        <TextInput label="Manufacturer" value={editFields.make as string} field="make" placeholder="e.g. Audi" />
-                                        <TextInput label="Model" value={editFields.model as string} field="model" placeholder="e.g. A4 Avant" />
+                                        <div>
+                                            <FieldLabel>Manufacturer</FieldLabel>
+                                            <select
+                                                value={textValue(editFields.make) || ''}
+                                                onChange={e => {
+                                                    const found = taxMakes.find(m => m.name === e.target.value);
+                                                    updateField('make', e.target.value);
+                                                    updateField('model', '');
+                                                    updateField('generation', '');
+                                                    updateField('trim', '');
+                                                    setTaxMakeId(found?.makeId || '');
+                                                    setTaxModelId(''); setTaxGenerationId('');
+                                                    setTaxModels([]); setTaxGenerations([]); setTaxTrims([]);
+                                                    if (found?.makeId) {
+                                                        const vt = encodeURIComponent((editFields.vehicleType as string) || 'Car');
+                                                        fetch(`/api/vehicles/taxonomy?resource=models&makeId=${found.makeId}&vehicleType=${vt}`)
+                                                            .then(r => r.json()).then(d => setTaxModels(d.models || [])).catch(() => {});
+                                                    }
+                                                }}
+                                                className={dropdownClasses}
+                                            >
+                                                <option value="">Select manufacturer</option>
+                                                {editFields.make && !taxMakes.find(m => m.name === textValue(editFields.make)) && (
+                                                    <option key="__current_make" value={textValue(editFields.make)}>{textValue(editFields.make)}</option>
+                                                )}
+                                                {taxMakes.map((m, i) => <option key={m.makeId || `make_${i}`} value={m.name}>{m.name}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <FieldLabel>Model</FieldLabel>
+                                            <select
+                                                value={textValue(editFields.model) || ''}
+                                                onChange={e => {
+                                                    const found = taxModels.find(m => m.name === e.target.value);
+                                                    updateField('model', e.target.value);
+                                                    updateField('generation', '');
+                                                    updateField('trim', '');
+                                                    setTaxModelId(found?.modelId || '');
+                                                    setTaxGenerationId('');
+                                                    setTaxGenerations([]); setTaxTrims([]);
+                                                    if (found?.modelId) {
+                                                        fetch(`/api/vehicles/taxonomy?resource=generations&modelId=${found.modelId}`)
+                                                            .then(r => r.json()).then(d => setTaxGenerations(d.generations || [])).catch(() => {});
+                                                    }
+                                                }}
+                                                className={dropdownClasses}
+                                            >
+                                                <option value="">Select model</option>
+                                                {editFields.model && !taxModels.find(m => m.name === textValue(editFields.model)) && (
+                                                    <option key="__current_model" value={textValue(editFields.model)}>{textValue(editFields.model)}</option>
+                                                )}
+                                                {taxModels.map((m, i) => <option key={m.modelId || `model_${i}`} value={m.name}>{m.name}</option>)}
+                                            </select>
+                                        </div>
                                     </div>
 
                                     {/* Generation & Trim */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                                        <TextInput label="Generation" value={editFields.generation as string} field="generation" placeholder="e.g. Estate (2019 - 2024)" />
-                                        <TextInput label="Trim" value={editFields.trim as string} field="trim" placeholder="e.g. Sport" />
+                                        <div>
+                                            <FieldLabel>Generation</FieldLabel>
+                                            <select
+                                                value={textValue(editFields.generation) || ''}
+                                                onChange={e => {
+                                                    const found = taxGenerations.find(g => g.name === e.target.value);
+                                                    updateField('generation', e.target.value);
+                                                    updateField('trim', '');
+                                                    setTaxGenerationId(found?.generationId || '');
+                                                    setTaxTrims([]);
+                                                    if (found?.generationId) {
+                                                        fetch(`/api/vehicles/taxonomy?resource=trims&generationId=${found.generationId}`)
+                                                            .then(r => r.json()).then(d => setTaxTrims((d.trims || []).map((t: any) => t.name).filter((n: any) => typeof n === 'string' && n.length > 0))).catch(() => {});
+                                                    }
+                                                }}
+                                                className={dropdownClasses}
+                                            >
+                                                <option value="">Select generation</option>
+                                                {editFields.generation && !taxGenerations.find(g => g.name === textValue(editFields.generation)) && (
+                                                    <option key="__current_gen" value={textValue(editFields.generation)}>{textValue(editFields.generation)}</option>
+                                                )}
+                                                {taxGenerations.map((g, i) => <option key={g.generationId || `gen_${i}`} value={g.name}>{g.name}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <FieldLabel>Trim</FieldLabel>
+                                            <select
+                                                value={textValue(editFields.trim) || ''}
+                                                onChange={e => updateField('trim', e.target.value)}
+                                                className={dropdownClasses}
+                                            >
+                                                <option value="">Select trim</option>
+                                                {editFields.trim && !taxTrims.includes(textValue(editFields.trim)) && (
+                                                    <option key="__current_trim" value={textValue(editFields.trim)}>{textValue(editFields.trim)}</option>
+                                                )}
+                                                {taxTrims.map((t, i) => <option key={`trim_${i}_${t}`} value={t}>{t}</option>)}
+                                            </select>
+                                        </div>
                                     </div>
 
                                     {/* Engine Size & Fuel */}
@@ -5124,6 +5796,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                     make={editFields.make as string}
                                     model={editFields.model as string}
                                     generation={editFields.generation as string}
+                                    generationId={taxGenerationId}
                                     fuelType={editFields.fuelType as string}
                                     engineSize={editFields.engineSize as string}
                                     onChange={(derivativeLabel) => setEditFields(prev => ({ ...prev, derivative: derivativeLabel }))}
@@ -5157,36 +5830,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                     </div>
                                 </div>
 
-                                {/* ─── Listing Information Section ────────────────────────── */}
+                                {/* ─── Mileage & Date Section ─────────────────────────────── */}
                                 <div className="bg-white rounded-lg border border-[#E2E8F0] p-6 shadow-sm">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-                                        <div>
-                                            <FieldLabel>Forecourt Price <span className="text-[11px] text-slate-400 font-normal">(shown to customer on AT)</span></FieldLabel>
-                                            <div className="relative">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-[13px]">£</span>
-                                                <input
-                                                    type="number"
-                                                    value={editForecourtPrice}
-                                                    onChange={e => setEditForecourtPrice(e.target.value)}
-                                                    placeholder="0"
-                                                    className="w-full pl-7 px-3 py-2 bg-white border border-[#E2E8F0] rounded-md text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#4D7CFF] focus:ring-1 focus:ring-[#4D7CFF] transition-colors shadow-sm"
-                                                />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <FieldLabel>Supplied Price <span className="text-[11px] text-slate-400 font-normal">(internal reference)</span></FieldLabel>
-                                            <div className="relative">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-[13px]">£</span>
-                                                <input
-                                                    type="number"
-                                                    value={editPrice}
-                                                    onChange={e => setEditPrice(e.target.value)}
-                                                    placeholder="0"
-                                                    className="w-full pl-7 px-3 py-2 bg-white border border-[#E2E8F0] rounded-md text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#4D7CFF] focus:ring-1 focus:ring-[#4D7CFF] transition-colors shadow-sm"
-                                                />
-                                            </div>
-                                        </div>
-                                        <PriceInput label="Purchase Cost" value={editFields.purchasePrice} field="purchasePrice" />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                         <div>
                                             <FieldLabel>Mileage</FieldLabel>
                                             <div className="relative">
@@ -5212,21 +5858,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 className="w-full px-3 py-2 bg-white border border-[#E2E8F0] rounded-md text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#4D7CFF] focus:ring-1 focus:ring-[#4D7CFF] transition-colors shadow-sm uppercase"
                                             />
                                         </div>
-                                        <TextInput label="Key Tags" value={editFields.keyTags as string} field="keyTags" placeholder="TAG-001" />
-                                        <div>
-                                            <FieldLabel>Service History</FieldLabel>
-                                            <select
-                                                value={(editFields.serviceHistory as string) || ''}
-                                                onChange={(e) => updateField('serviceHistory', e.target.value)}
-                                                className="w-full px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold focus:bg-white focus:ring-4 focus:ring-indigo-50 outline-none transition-all appearance-none"
-                                            >
-                                                <option value="Full service history">Full Service History</option>
-                                                <option value="Full dealership history">Full Dealership History</option>
-                                                <option value="Part service history">Part Service History</option>
-                                                <option value="No service history">No Service History</option>
-                                            </select>
-                                        </div>
-                                        <NumberInput label="Previous Owners" value={editFields.previousOwners} field="previousOwners" />
                                     </div>
                                 </div>
 
@@ -5857,9 +6488,16 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 setEditFeatures={setEditFeatures}
                                 saving={saving}
                                 onSave={handleSaveContent}
-                                vehicleMake={vehicle?.make}
+                                vehicleMake={textValue(vehicle?.make)}
                                 vehicleFeatures={vehicle?.features || []}
                                 vehicleVrm={vehicle?.vrm}
+                                vehicleInfo={{
+                                    mileage: vehicle?.mileage ? Number(vehicle.mileage) : undefined,
+                                    bhp: (vehicle as any)?.technicalSpecs?.enginePowerBHP ?? undefined,
+                                    year: vehicle?.year ? Number(vehicle.year) : undefined,
+                                    derivative: vehicle?.derivative || undefined,
+                                    ulezCompliant: (vehicle as any)?.technicalSpecs?.ulezCompliant ?? undefined,
+                                }}
                                 atOptions={atOptions}
                                 atStdFeatures={atStdFeatures}
                                 atFactoryFitted={atFactoryFitted}
@@ -5877,6 +6515,14 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 vehicle={vehicle}
                                 saving={saving}
                                 onSave={(updates) => patchVehicle(updates)}
+                                onVinFound={(vin, engineNumber) => {
+                                    const patch: Record<string, string> = {};
+                                    if (vin) patch.vin = vin;
+                                    if (engineNumber) patch.engineNumber = engineNumber;
+                                    patchVehicle(patch);
+                                    setVehicle(prev => prev ? { ...prev, ...patch } : null);
+                                    setEditFields(prev => ({ ...prev, ...patch }));
+                                }}
                             />
                         )}
 
@@ -6009,26 +6655,37 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                     )}
 
-                                    {/* Footer — Save & Publish / Save & Unpublish */}
+                                    {/* Footer — Create / Save & Publish / Save & Unpublish */}
                                     <div className="flex items-center justify-between px-6 py-4 bg-slate-50/60 border-t border-[#E2E8F0]">
                                         <div className="text-[11px] text-slate-400 font-medium">
                                             {vehicle.stockId
                                                 ? <span>Stock ID: <span className="font-mono font-bold text-slate-500">{vehicle.stockId.substring(0, 12)}…</span></span>
-                                                : <span className="text-amber-600">⚠ Not yet linked to AutoTrader stock</span>
+                                                : <span className="text-amber-600">⚠ Not yet pushed to AutoTrader</span>
                                             }
                                         </div>
-                                        <button
-                                            onClick={handleSaveChannels}
-                                            disabled={saving}
-                                            className={`flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold transition-all shadow-sm ${
-                                                vehicle.atAdvertStatus === 'PUBLISHED'
-                                                    ? 'bg-slate-800 text-white hover:bg-slate-900'
-                                                    : 'bg-[#4D7CFF] text-white hover:bg-blue-600'
-                                            }`}
-                                        >
-                                            {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                            {vehicle.atAdvertStatus === 'PUBLISHED' ? 'Save & Unpublish' : 'Save & Publish'}
-                                        </button>
+                                        {vehicle.stockId ? (
+                                            <button
+                                                onClick={handleSaveChannels}
+                                                disabled={saving}
+                                                className={`flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold transition-all shadow-sm ${
+                                                    vehicle.atAdvertStatus === 'PUBLISHED'
+                                                        ? 'bg-slate-800 text-white hover:bg-slate-900'
+                                                        : 'bg-[#4D7CFF] text-white hover:bg-blue-600'
+                                                }`}
+                                            >
+                                                {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                                                {vehicle.atAdvertStatus === 'PUBLISHED' ? 'Save & Unpublish' : 'Save & Publish'}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={handleCreateAtStock}
+                                                disabled={saving}
+                                                className="flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold bg-[#FF6B00] text-white hover:bg-orange-600 transition-all shadow-sm disabled:opacity-50"
+                                            >
+                                                {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                                                Push to AutoTrader
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -6128,16 +6785,16 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             <ConditionReportTab
                                 vehicleId={id}
                                 vehicleMileage={typeof vehicle.mileage === 'number' ? vehicle.mileage : undefined}
-                                vehicleMake={vehicle.make}
-                                vehicleModel={vehicle.model}
+                                vehicleMake={textValue(vehicle.make)}
+                                vehicleModel={textValue(vehicle.model)}
                                 vehicleVRM={vehicle.vrm}
                                 vehicleMotExpiry={vehicle.motExpiry ?? ''}
-                                vehicleColour={vehicle.colour}
-                                vehicleFuelType={vehicle.fuelType}
-                                vehicleTransmission={vehicle.transmission}
-                                vehicleEngineSize={vehicle.engineSize}
+                                vehicleColour={textValue(vehicle.colour)}
+                                vehicleFuelType={textValue(vehicle.fuelType)}
+                                vehicleTransmission={textValue(vehicle.transmission)}
+                                vehicleEngineSize={textValue(vehicle.engineSize)}
                                 vehicleYear={vehicle.year}
-                                vehicleBodyType={vehicle.bodyType}
+                                vehicleBodyType={textValue(vehicle.bodyType)}
                                 vehicleDoors={vehicle.doors}
                                 vehicleSeats={vehicle.seats}
                             />
@@ -6166,9 +6823,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             <VehicleJobsTab
                                 vehicle={{
                                     _id: vehicle._id ?? vehicle.id,
-                                    make: vehicle.make || '',
-                                    model: vehicle.model || '',
-                                    derivative: vehicle.derivative,
+                                    make: textValue(vehicle.make),
+                                    model: textValue(vehicle.model),
+                                    derivative: textValue(vehicle.derivative),
                                     vrm: vehicle.vrm || '',
                                 }}
                             />
@@ -6214,12 +6871,667 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             />
                         )}
 
+                        {/* ═══ PURCHASE & COSTS TAB ════════════════════════════════ */}
+                        {activeTab === 'purchaseCosts' && vehicle && (() => {
+                            const purchasePrice = Number(editFields.purchasePrice) || 0;
+                            const vatType = (editFields.vatType as string) || 'Margin';
+                            const purchaseVat = vatType === 'Standard' ? parseFloat((purchasePrice - purchasePrice / 1.2).toFixed(2)) : 0;
+                            const purchaseTotal = purchasePrice;
+                            const additionalTotal = vehicleAdditionalCosts.reduce((s, c) => s + (c.cost || 0), 0);
+                            const additionalVat = vehicleAdditionalCosts.reduce((s, c) => s + (c.vat || 0), 0);
+                            const additionalGrandTotal = vehicleAdditionalCosts.reduce((s, c) => s + (c.total || 0), 0);
+                            const newCostCost = parseFloat(newCostFields.cost) || 0;
+                            const newCostVatRate = parseFloat(newCostFields.vatRate) || 0;
+                            const newCostVat = parseFloat((newCostCost * newCostVatRate / 100).toFixed(2));
+                            const newCostTotal = parseFloat((newCostCost + newCostVat).toFixed(2));
+                            const COST_CATEGORIES = ['Advertising', 'Bodywork', 'Buyers Fee', 'Delivery', 'Electric Charge', 'Finance', 'Fuel', 'Insurance', 'MOT', 'Paint', 'Part Exchange', 'Photography', 'Preparation', 'Reconditioning', 'Service', 'Sourcing Fee', 'Tinting', 'Tyres', 'Valeting', 'Warranty', 'Other'];
+                            return (
+                                <div className="space-y-6 max-w-4xl">
+                                    {/* ── Purchase Details ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="p-6 space-y-5">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <div>
+                                                    <FieldLabel>Purchase Date</FieldLabel>
+                                                    <input type="date" value={(editFields.purchaseDate as string) || ''} onChange={e => updateField('purchaseDate', e.target.value)} className={inputClasses} />
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Name of Supplier</FieldLabel>
+                                                    <input type="text" value={(editFields.supplierName as string) || ''} onChange={e => updateField('supplierName', e.target.value)} placeholder="Start typing to search..." className={inputClasses} />
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Supplier Invoice No.</FieldLabel>
+                                                    <input type="text" value={(editFields.supplierInvoiceNo as string) || ''} onChange={e => updateField('supplierInvoiceNo', e.target.value)} className={inputClasses} />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <div>
+                                                    <FieldLabel>Purchase Price</FieldLabel>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <input type="number" value={editFields.purchasePrice || ''} onChange={e => updateField('purchasePrice', e.target.value)} placeholder="0.00" className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none bg-transparent" />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Purchase VAT <span className="text-[10px] text-slate-400 font-normal ml-1">({vatType})</span></FieldLabel>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-slate-50">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <span className="flex-1 px-2 py-2 text-[13px] text-slate-500">{purchaseVat.toFixed(2)}</span>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Purchase Total</FieldLabel>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-slate-50">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <span className="flex-1 px-2 py-2 text-[13px] font-semibold text-slate-800">{purchaseTotal.toFixed(2)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <div>
+                                                    <FieldLabel>VAT Type</FieldLabel>
+                                                    <select value={vatType} onChange={e => updateField('vatType', e.target.value)} className={`${inputClasses} appearance-none`}>
+                                                        <option value="Margin">Margin</option>
+                                                        <option value="Standard">Standard</option>
+                                                        <option value="Zero Rated">Zero Rated</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            {/* Create Purchase Invoice CTA */}
+                                            <div className="flex items-center justify-between bg-[#F0F7FF] border border-[#C5DDFF] rounded-lg px-5 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <svg className="w-5 h-5 text-[#4D7CFF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                                                    <div>
+                                                        <div className="text-[13px] font-semibold text-[#4D7CFF]">Create Purchase Invoice</div>
+                                                        <div className="text-[12px] text-slate-500">Would you like to create a purchase invoice using the above values?</div>
+                                                    </div>
+                                                </div>
+                                                <button onClick={handleSaveVehicleFields} disabled={saving} className="px-5 py-2.5 bg-[#4D7CFF] text-white rounded-lg text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm whitespace-nowrap">
+                                                    Create Purchase
+                                                </button>
+                                            </div>
+                                            {/* Funding Provider collapsible */}
+                                            <div>
+                                                <button onClick={() => setShowFundingProvider(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-[#4D7CFF] hover:text-blue-700 transition-colors">
+                                                    <svg className={`w-3 h-3 transition-transform ${showFundingProvider ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                    {showFundingProvider ? 'Hide' : 'Show'} Funding Provider
+                                                </button>
+                                                {showFundingProvider && (
+                                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5 pl-1">
+                                                        <div>
+                                                            <FieldLabel>Funding Provider</FieldLabel>
+                                                            <input type="text" value={(editFields.fundingProvider as string) || ''} onChange={e => updateField('fundingProvider', e.target.value)} placeholder="Start typing to search..." className={inputClasses} />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <FieldLabel>Funding Amount</FieldLabel>
+                                                                <button onClick={() => updateField('fundingAmount', purchaseTotal)} className="text-[11px] font-semibold text-[#4D7CFF] border border-[#DCE4FF] rounded px-2 py-0.5 hover:bg-blue-50 transition-colors">Use Purchase Total</button>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                                <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                                <input type="number" value={editFields.fundingAmount || ''} onChange={e => updateField('fundingAmount', e.target.value)} placeholder="" className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none bg-transparent" />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* ── Additional Costs ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                                            <h3 className="text-[15px] font-bold text-slate-800">Additional Costs</h3>
+                                        </div>
+                                        {/* Tabs */}
+                                        <div className="border-b border-slate-100">
+                                            <div className="flex px-6">
+                                                {(['without', 'invoice'] as const).map(tab => (
+                                                    <button key={tab} onClick={() => setAddCostTab(tab)} className={`px-4 py-3 text-[13px] font-semibold border-b-2 transition-colors ${addCostTab === tab ? 'border-[#4D7CFF] text-[#4D7CFF]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                                                        {tab === 'invoice' ? 'Create Purchase Invoice' : 'Add Without Invoice'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="p-6">
+                                            {addCostTab === 'invoice' && (
+                                                <div className="space-y-4">
+                                                    <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center text-[13px] text-slate-400 italic">
+                                                        Drop image or PDF file, or click to browse.
+                                                    </div>
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="flex-1 border-t border-slate-200" />
+                                                        <span className="text-[12px] text-slate-400 font-semibold">OR</span>
+                                                        <div className="flex-1 border-t border-slate-200" />
+                                                    </div>
+                                                    <div className="flex justify-end">
+                                                        <button className="px-5 py-2.5 bg-[#4D7CFF] text-white rounded-lg text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm">Create Purchase</button>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {addCostTab === 'without' && (
+                                                <div className="space-y-5">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                        <div>
+                                                            <FieldLabel>Category</FieldLabel>
+                                                            <select value={newCostFields.category} onChange={e => setNewCostFields(p => ({ ...p, category: e.target.value }))} className={`${inputClasses} appearance-none`}>
+                                                                <option value="">Start typing...</option>
+                                                                {COST_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        <div>
+                                                            <FieldLabel>Date</FieldLabel>
+                                                            <input type="date" value={newCostFields.date} onChange={e => setNewCostFields(p => ({ ...p, date: e.target.value }))} className={inputClasses} />
+                                                        </div>
+                                                        <div>
+                                                            <FieldLabel>Supplier</FieldLabel>
+                                                            <input type="text" value={newCostFields.supplier} onChange={e => setNewCostFields(p => ({ ...p, supplier: e.target.value }))} className={inputClasses} />
+                                                        </div>
+                                                        <div>
+                                                            <FieldLabel>Reference</FieldLabel>
+                                                            <input type="text" value={newCostFields.reference} onChange={e => setNewCostFields(p => ({ ...p, reference: e.target.value }))} className={inputClasses} />
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-4">
+                                                        <div>
+                                                            <FieldLabel>Cost</FieldLabel>
+                                                            <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                                <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                                <input type="number" value={newCostFields.cost} onChange={e => setNewCostFields(p => ({ ...p, cost: e.target.value }))} placeholder="" className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none bg-transparent" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <FieldLabel>VAT</FieldLabel>
+                                                                <select value={newCostFields.vatRate} onChange={e => setNewCostFields(p => ({ ...p, vatRate: e.target.value }))} className="text-[11px] border border-slate-200 rounded px-1 py-0.5 text-slate-600">
+                                                                    <option value="0">0%</option>
+                                                                    <option value="5">5%</option>
+                                                                    <option value="20">20%</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-slate-50">
+                                                                <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                                <span className="flex-1 px-2 py-2 text-[13px] text-slate-500">{newCostVat.toFixed(2)}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <FieldLabel>Total</FieldLabel>
+                                                            <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-slate-50">
+                                                                <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                                <span className="flex-1 px-2 py-2 text-[13px] font-semibold text-slate-800">{newCostTotal.toFixed(2)}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-end">
+                                                        <button
+                                                            onClick={async () => {
+                                                                if (!newCostFields.cost) return;
+                                                                const entry = { id: Date.now().toString(), category: newCostFields.category || 'Other', date: newCostFields.date, supplier: newCostFields.supplier, reference: newCostFields.reference, cost: newCostCost, vatRate: newCostVatRate, vat: newCostVat, total: newCostTotal };
+                                                                const updated = [...vehicleAdditionalCosts, entry];
+                                                                setVehicleAdditionalCosts(updated);
+                                                                setNewCostFields({ category: '', date: '', supplier: '', reference: '', cost: '', vatRate: '20' });
+                                                                await patchVehicle({ vehicleAdditionalCosts: updated });
+                                                            }}
+                                                            disabled={!newCostFields.cost || saving}
+                                                            className="px-5 py-2.5 bg-[#4D7CFF] text-white rounded-lg text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm disabled:opacity-50"
+                                                        >
+                                                            Add Additional Cost
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Costs list */}
+                                            {vehicleAdditionalCosts.length > 0 && (
+                                                <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden">
+                                                    <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
+                                                        <div className="flex gap-2">
+                                                            <button onClick={() => { const all: Record<string, boolean> = {}; vehicleAdditionalCosts.forEach(c => { all[c.id] = true; }); setExpandedCosts(all); }} className="text-[11px] font-semibold text-slate-500 border border-slate-200 rounded px-2 py-1 hover:bg-white transition-colors">Expand All</button>
+                                                            <button onClick={() => setExpandedCosts({})} className="text-[11px] font-semibold text-slate-500 border border-slate-200 rounded px-2 py-1 hover:bg-white transition-colors">Collapse All</button>
+                                                        </div>
+                                                        <div className="hidden md:grid grid-cols-3 gap-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider pr-2" style={{width: '360px'}}>
+                                                            <span className="text-right">Cost</span>
+                                                            <span className="text-right">VAT</span>
+                                                            <span className="text-right">Total</span>
+                                                        </div>
+                                                    </div>
+                                                    {vehicleAdditionalCosts.map((item, idx) => (
+                                                        <div key={item.id} className="border-b border-slate-100 last:border-0">
+                                                            <div className="flex items-center px-4 py-3 hover:bg-slate-50 cursor-pointer" onClick={() => setExpandedCosts(p => ({ ...p, [item.id]: !p[item.id] }))}>
+                                                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                                    <svg className={`w-3 h-3 text-[#4D7CFF] flex-shrink-0 transition-transform ${expandedCosts[item.id] ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                                    <span className="text-[13px] font-semibold text-[#4D7CFF] truncate">Additional Cost</span>
+                                                                    <span className="text-[12px] text-slate-500 truncate">{item.category}</span>
+                                                                    {item.supplier && <span className="text-[12px] text-slate-400 truncate">{item.supplier}</span>}
+                                                                </div>
+                                                                <div className="hidden md:grid grid-cols-3 gap-4 text-[13px] flex-shrink-0" style={{width: '360px'}}>
+                                                                    <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="text-slate-700">{item.cost.toFixed(2)}</span></div>
+                                                                    <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="text-slate-700">{item.vat.toFixed(2)}</span></div>
+                                                                    <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="font-semibold text-slate-800">{item.total.toFixed(2)}</span></div>
+                                                                </div>
+                                                            </div>
+                                                            {expandedCosts[item.id] && (
+                                                                <div className="px-8 pb-3 pt-1 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                                                                    <div className="text-[12px] text-slate-500 space-y-0.5">
+                                                                        {item.date && <div>Date: {item.date}</div>}
+                                                                        {item.reference && <div>Reference: {item.reference}</div>}
+                                                                        <div>VAT Rate: {item.vatRate}%</div>
+                                                                    </div>
+                                                                    <button onClick={async () => { const updated = vehicleAdditionalCosts.filter((_, i) => i !== idx); setVehicleAdditionalCosts(updated); await patchVehicle({ vehicleAdditionalCosts: updated }); }} className="text-[12px] font-semibold text-red-500 border border-red-200 rounded px-3 py-1 hover:bg-red-50 transition-colors">Remove</button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                    <div className="flex items-center px-4 py-3 bg-slate-50 border-t border-slate-200">
+                                                        <span className="flex-1 text-[13px] font-bold text-slate-700">Total Additional Costs</span>
+                                                        <div className="hidden md:grid grid-cols-3 gap-4 text-[13px] flex-shrink-0" style={{width: '360px'}}>
+                                                            <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="font-bold text-slate-800">{additionalTotal.toFixed(2)}</span></div>
+                                                            <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="font-bold text-slate-800">{additionalVat.toFixed(2)}</span></div>
+                                                            <div className="flex items-center gap-1 justify-end"><span className="text-slate-400 text-[11px]">£</span><span className="font-bold text-slate-800">{additionalGrandTotal.toFixed(2)}</span></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {/* Stand In Value */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="grid grid-cols-3 divide-x divide-[#E2E8F0]">
+                                            {[
+                                                { label: 'Stand In Value Cost', value: (purchaseTotal + additionalTotal).toFixed(2) },
+                                                { label: 'Stand In Value VAT',  value: (purchaseVat + additionalVat).toFixed(2) },
+                                                { label: 'Stand In Value Total', value: (purchaseTotal + additionalGrandTotal).toFixed(2) },
+                                            ].map(item => (
+                                                <div key={item.label} className="p-5">
+                                                    <div className="text-[12px] font-semibold text-slate-500 mb-3">{item.label}</div>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden bg-slate-50">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <span className="flex-1 px-2 py-2 text-[13px] font-semibold text-slate-800">{item.value}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {/* Save / Save & Next */}
+                                    <div className="flex gap-3 pt-2">
+                                        <button onClick={handleSaveVehicleFields} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2">
+                                            {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                            {saving ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button onClick={() => { handleSaveVehicleFields(); setActiveTab('stockPrice'); }} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50">
+                                            Save &amp; Next -&gt;
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* ═══ STOCK & PRICE TAB ════════════════════════════════════ */}
+                        {activeTab === 'stockPrice' && vehicle && (() => {
+                            const websitePrice = Number(editPrice) || 0;
+                            const salesChannelPrice = Number(editForecourtPrice) || websitePrice;
+                            const reserveAmt = Number(editFields.reservePaymentAmount) || 0;
+                            const purchasePrice = Number(vehicle.purchasePrice) || 0;
+                            const additionalCostTotal = vehicleAdditionalCosts.reduce((s: number, c: any) => s + (c.cost || 0), 0);
+                            const grossProfit = websitePrice - purchasePrice;
+                            const marginalVat = (editFields.vatStatus as string) === 'Marginal' && grossProfit > 0 ? parseFloat((grossProfit / 6).toFixed(2)) : 0;
+                            const netProfit = grossProfit - marginalVat - additionalCostTotal;
+                            const retailVal = spValuation?.valuations?.find((v: any) => v.valuationType === 'Retail')?.amountGBP || 0;
+                            const pricePosition = retailVal > 0 ? Math.min(Math.round((websitePrice / retailVal) * 100), 100) : 0;
+                            const priceIndicator = pricePosition <= 95 ? { label: 'Great Price', color: '#00C896' } : pricePosition <= 105 ? { label: 'Good Price', color: '#00C896' } : pricePosition <= 115 ? { label: 'Fair Price', color: '#F59E0B' } : { label: 'High Price', color: '#EF4444' };
+                            const loadValuation = async () => {
+                                setSpValuationLoading(true);
+                                setSpValuationError('');
+                                try {
+                                    const res = await fetch('/api/vehicles/valuation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ vrm: vehicle.vrm, mileage: vehicle.mileage, condition: vehicle.condition || 'Good', derivativeId: (vehicle as any).derivativeId, registeredDate: (vehicle as any).dateOfRegistration, features: vehicle.features }) });
+                                    const d = await res.json();
+                                    if (d.ok) {
+                                        setSpValuation(d);
+                                    } else {
+                                        setSpValuationError(d.error?.message || 'Valuation not available for this vehicle.');
+                                    }
+                                } catch {
+                                    setSpValuationError('Network error — please try again.');
+                                }
+                                setSpValuationLoading(false);
+                            };
+                            return (
+                                <div className="space-y-5 max-w-4xl">
+                                    {/* ── Stock Details ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="p-6 space-y-5">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <TextInput label="Reference ID" value={editFields.referenceId as string} field="referenceId" placeholder="" />
+                                                <div>
+                                                    <FieldLabel>Stock ID</FieldLabel>
+                                                    <input type="text" readOnly value={vehicle.stockId || (vehicle as any)._id?.slice(-8)?.toUpperCase() || ''} className={`${inputClasses} bg-slate-50 cursor-default`} />
+                                                </div>
+                                                <TextInput label="Location" value={editFields.location as string} field="location" placeholder="Start typing to search..." />
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <TextInput label="VIN" value={editFields.vin as string} field="vin" placeholder="" />
+                                                <TextInput label="Engine Number" value={editFields.engineNumber as string} field="engineNumber" placeholder="" />
+                                                <TextInput label="New Keeper Reference (V5C)" value={editFields.newKeeperReference as string} field="newKeeperReference" placeholder="" />
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <TextInput label="Key Reference" value={editFields.keyReference as string} field="keyReference" placeholder="" />
+                                                <div>
+                                                    <FieldLabel>Due In Date</FieldLabel>
+                                                    <input type="date" value={(editFields.dueInDate as string) || ''} onChange={e => updateField('dueInDate', e.target.value)} className={inputClasses} />
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Date On Forecourt</FieldLabel>
+                                                    <input type="date" value={(editFields.dateOnForecourt as string) || ''} onChange={e => updateField('dateOnForecourt', e.target.value)} className={inputClasses} />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                                {[
+                                                    { label: 'Sale or Return', field: 'saleOrReturn' as keyof VehicleDetail },
+                                                    { label: 'Demonstrator', field: 'demonstrator' as keyof VehicleDetail },
+                                                    { label: 'Trade', field: 'trade' as keyof VehicleDetail },
+                                                ].map(item => (
+                                                    <div key={item.field}>
+                                                        <FieldLabel>{item.label}</FieldLabel>
+                                                        <div className="flex gap-5 mt-1">
+                                                            {[{ label: 'Yes', val: true }, { label: 'No', val: false }].map(o => (
+                                                                <label key={o.label} className="flex items-center gap-2 cursor-pointer">
+                                                                    <input type="radio" checked={!!(editFields as any)[item.field] === o.val} onChange={() => updateField(item.field, o.val)} className="w-4 h-4 text-[#4D7CFF]" />
+                                                                    <span className="text-[13px] text-slate-700">{o.label}</span>
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                <div>
+                                                    <FieldLabel>Origin</FieldLabel>
+                                                    <div className="flex gap-5 mt-1">
+                                                        {['UK Vehicle', 'Import'].map(o => (
+                                                            <label key={o} className="flex items-center gap-2 cursor-pointer">
+                                                                <input type="radio" checked={(editFields.origin as string) === o} onChange={() => updateField('origin', o)} className="w-4 h-4 text-[#4D7CFF]" />
+                                                                <span className="text-[13px] text-slate-700">{o}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <FieldLabel>Notes</FieldLabel>
+                                                <textarea value={(editFields.stockNotes as string) || ''} onChange={e => updateField('stockNotes', e.target.value)} rows={4} className={`${inputClasses} resize-y`} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* ── VAT Status ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-6">
+                                        <div className="text-[13px] font-semibold text-slate-700 mb-3">VAT Status</div>
+                                        <div className="flex gap-6">
+                                            {['Marginal', 'VAT Qualifying'].map(o => (
+                                                <label key={o} className="flex items-center gap-2 cursor-pointer">
+                                                    <input type="radio" checked={(editFields.vatStatus as string) === o} onChange={() => updateField('vatStatus', o)} className="w-4 h-4 text-[#4D7CFF]" />
+                                                    <span className="text-[13px] text-slate-700">{o}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* ── Valuation ── */}
+                                    <div className="rounded-xl overflow-hidden border border-emerald-200" style={{background: '#F0FDF9'}}>
+                                        <div className="px-6 py-4 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+                                                <span className="text-[15px] font-bold text-emerald-800">Valuation</span>
+                                            </div>
+                                            <button onClick={loadValuation} disabled={spValuationLoading} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors flex items-center gap-1.5">
+                                                {spValuationLoading ? <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" /> : null}
+                                                {spValuation ? 'Refresh Valuation' : 'Load Valuation'}
+                                            </button>
+                                        </div>
+                                        {spValuationError && !spValuation && (
+                                            <div className="px-6 pb-5 flex items-center gap-3 text-[13px] text-red-600 bg-red-50 border-t border-red-100 py-3">
+                                                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                                {spValuationError}
+                                            </div>
+                                        )}
+                                        {spValuation ? (
+                                            <>
+                                                <div className="text-[12px] text-emerald-600 px-6 pb-3">Based on date first registered, mileage, condition and optional extras.</div>
+                                                <div className="grid grid-cols-3 gap-4 px-6 pb-4">
+                                                    {[
+                                                        { label: 'Trade Valuation', key: 'Trade' },
+                                                        { label: 'Part Ex Valuation', key: 'PartExchange' },
+                                                        { label: 'Retail Valuation', key: 'Retail' },
+                                                    ].map(item => {
+                                                        const val = spValuation.valuations?.find((v: any) => v.valuationType === item.key);
+                                                        return (
+                                                            <div key={item.key} className="rounded-xl p-5 text-center" style={{background: '#00B67A'}}>
+                                                                <div className="text-[11px] text-white/80 mb-1">AutoTrader</div>
+                                                                <div className="text-[11px] font-bold text-white mb-3">{item.label}</div>
+                                                                <div className="text-[22px] font-bold text-white">{val?.amountGBP ? `£${val.amountGBP.toLocaleString()}` : '—'}</div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <div className="px-6 pb-4">
+                                                    <button onClick={() => setSpShowTrend(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
+                                                        <svg className={`w-3 h-3 transition-transform ${spShowTrend ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                        Show Valuation Trend
+                                                    </button>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="px-6 pb-5 text-[13px] text-emerald-600">Click &quot;Load Valuation&quot; to fetch AT Trade, Part Ex &amp; Retail valuations.</div>
+                                        )}
+                                    </div>
+
+                                    {/* ── Vehicle Metrics ── */}
+                                    {spValuation?.metrics && (
+                                        <div className="rounded-xl overflow-hidden border border-teal-200" style={{background: '#F0FDFA'}}>
+                                            <div className="px-6 py-4 flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                                                    <span className="text-[15px] font-bold text-teal-800">Vehicle Metrics</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-[12px] text-teal-600 px-6 pb-3">Market insights powered by AutoTrader.</div>
+                                            <div className="grid grid-cols-3 gap-4 px-6 pb-5">
+                                                {[
+                                                    { label: 'Live Market', value: spValuation.metrics.vehicleMetrics?.liveRetailPercentage != null ? `${spValuation.metrics.vehicleMetrics.liveRetailPercentage}%` : '—' },
+                                                    { label: 'Retail Rating', value: spValuation.metrics.rating != null ? `${spValuation.metrics.rating} / 100` : '—' },
+                                                    { label: 'Days to Sell', value: spValuation.metrics.daysToSell != null ? String(spValuation.metrics.daysToSell) : '—' },
+                                                ].map(item => (
+                                                    <div key={item.label} className="rounded-xl p-5 text-center text-white" style={{background: '#0E9F9F'}}>
+                                                        <div className="text-[12px] text-white/80 mb-2">{item.label}</div>
+                                                        <div className="text-[24px] font-bold">{item.value}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* ── Pricing ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="p-6 space-y-5">
+                                            {retailVal > 0 && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="bg-slate-50 rounded-lg p-4">
+                                                        <div className="text-[12px] font-semibold text-slate-500 mb-2 text-center">Price Position</div>
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                                                                <div className="h-full rounded-full transition-all" style={{width: `${pricePosition}%`, background: priceIndicator.color}} />
+                                                            </div>
+                                                            <span className="text-[13px] font-bold text-slate-700">{pricePosition}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="bg-slate-50 rounded-lg p-4 flex flex-col items-center justify-center">
+                                                        <div className="text-[12px] font-semibold text-slate-500 mb-2">Price Indicator</div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-3 h-3 rounded-full" style={{background: priceIndicator.color}} />
+                                                            <span className="text-[15px] font-bold text-slate-800">{priceIndicator.label}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <FieldLabel>Website Price</FieldLabel>
+                                                        {retailVal > 0 && <button onClick={() => setEditPrice(String(retailVal))} className="text-[11px] font-semibold text-[#4D7CFF] border border-[#DCE4FF] rounded px-2 py-0.5 hover:bg-blue-50 transition-colors">Use Valuation</button>}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none" />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Sales Channel Price <span className="text-[10px] text-slate-400 font-normal">(AT / forecourt)</span></FieldLabel>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <input type="number" value={editForecourtPrice} onChange={e => setEditForecourtPrice(e.target.value)} placeholder={String(websitePrice || '')} className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none" />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <FieldLabel>Reserve Payment Amount</FieldLabel>
+                                                    <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
+                                                        <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                        <input type="number" value={editFields.reservePaymentAmount || ''} onChange={e => updateField('reservePaymentAmount', e.target.value)} placeholder="250.00" className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {/* Show Profit Calculations */}
+                                            <div>
+                                                <button onClick={() => setSpShowProfit(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-[#4D7CFF]">
+                                                    <svg className={`w-3 h-3 transition-transform ${spShowProfit ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                    Show Profit Calculations
+                                                </button>
+                                                {spShowProfit && (
+                                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-5">
+                                                        {[
+                                                            { label: 'Gross Profit', value: grossProfit.toFixed(2), sub: 'Website Price minus Purchase Price exc. VAT' },
+                                                            { label: 'Marginal VAT', value: marginalVat.toFixed(2), sub: '1/6th of Gross Profit' },
+                                                            { label: 'Net Profit after VAT & Additional Costs', value: netProfit.toFixed(2), sub: 'Gross Profit minus Marginal VAT minus Additional Costs exc. VAT' },
+                                                        ].map(item => (
+                                                            <div key={item.label}>
+                                                                <div className="text-[12px] font-semibold text-slate-600 mb-2">{item.label}</div>
+                                                                <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-slate-50">
+                                                                    <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
+                                                                    <span className="flex-1 px-2 py-2 text-[13px] font-semibold text-slate-800">{item.value}</span>
+                                                                </div>
+                                                                <div className="text-[11px] text-slate-400 mt-1 italic">{item.sub}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* ── Quantity Available (To Order only) ── */}
+                                    {vehicle.status === 'To Order' && (
+                                        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-6">
+                                            <div className="max-w-xs">
+                                                <FieldLabel>Quantity Available</FieldLabel>
+                                                <input type="number" value={editFields.quantityAvailable || ''} onChange={e => updateField('quantityAvailable', e.target.value)} className={inputClasses} />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Save / Save & Next */}
+                                    <div className="flex gap-3 pt-2">
+                                        <button onClick={handleSaveVehicleFields} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2">
+                                            {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                            {saving ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button onClick={() => { handleSaveVehicleFields(); setActiveTab('salesChannels'); }} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50">
+                                            Save &amp; Next -&gt;
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* ═══ WORKFLOW TAB ═════════════════════════════════════════ */}
+                        {activeTab === 'workflow' && vehicle && (() => {
+                            const STAGES = [
+                                { key: 'purchased',    label: 'Purchased',       icon: '🛒' },
+                                { key: 'inspected',    label: 'Inspection',      icon: '🔍' },
+                                { key: 'valeted',      label: 'Valeting',        icon: '✨' },
+                                { key: 'photographed', label: 'Photography',     icon: '📷' },
+                                { key: 'advertised',   label: 'Advertised',      icon: '📢' },
+                                { key: 'readyForSale', label: 'Ready for Sale',  icon: '✅' },
+                            ];
+                            const completedCount = STAGES.filter(s => workflowStages[s.key]?.completed).length;
+                            return (
+                                <div className="space-y-5 max-w-3xl">
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                                            <h3 className="text-[14px] font-semibold text-slate-800">Vehicle Workflow</h3>
+                                            <span className="text-[12px] font-semibold text-slate-400">{completedCount}/{STAGES.length} completed</span>
+                                        </div>
+                                        <div className="p-4">
+                                            <div className="flex items-center gap-1 mb-6 px-2">
+                                                {STAGES.map((s, i) => (
+                                                    <div key={s.key} className="flex items-center flex-1">
+                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] flex-shrink-0 ${workflowStages[s.key]?.completed ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                                                            {workflowStages[s.key]?.completed ? '✓' : i + 1}
+                                                        </div>
+                                                        {i < STAGES.length - 1 && <div className={`flex-1 h-0.5 mx-1 ${workflowStages[s.key]?.completed ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="space-y-3">
+                                                {STAGES.map(stage => {
+                                                    const s = workflowStages[stage.key] || { completed: false, date: '', notes: '' };
+                                                    return (
+                                                        <div key={stage.key} className={`rounded-lg border p-4 transition-colors ${s.completed ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}>
+                                                            <div className="flex items-start gap-3">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={s.completed}
+                                                                    onChange={e => setWorkflowStages(prev => ({ ...prev, [stage.key]: { ...prev[stage.key], completed: e.target.checked } }))}
+                                                                    className="mt-0.5 w-4 h-4 text-emerald-500 rounded border-slate-300 focus:ring-emerald-400"
+                                                                />
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <span className="text-[14px]">{stage.icon}</span>
+                                                                        <span className={`text-[13px] font-semibold ${s.completed ? 'text-emerald-700 line-through' : 'text-slate-800'}`}>{stage.label}</span>
+                                                                        {s.completed && <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-600 rounded-full">Done</span>}
+                                                                    </div>
+                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Date Completed</label>
+                                                                            <input type="date" value={s.date || ''} onChange={e => setWorkflowStages(prev => ({ ...prev, [stage.key]: { ...prev[stage.key], date: e.target.value } }))} className={inputClasses} />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Notes</label>
+                                                                            <input type="text" value={s.notes || ''} placeholder="Optional notes..." onChange={e => setWorkflowStages(prev => ({ ...prev, [stage.key]: { ...prev[stage.key], notes: e.target.value } }))} className={inputClasses} />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 pt-2">
+                                        <button onClick={handleSaveWorkflow} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2">
+                                            {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                            {saving ? 'Saving...' : 'Save'}
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
                         {/* ═══ SELL VEHICLE TAB ═════════════════════════════════════ */}
                         {activeTab === 'sellVehicle' && vehicle && (
                             <VehicleSellTab
                                 vehicleId={vehicle._id ?? vehicle.id}
                                 vehiclePrice={vehicle.price}
-                                vehicleName={`${vehicle.make} ${vehicle.model} ${vehicle.derivative}`}
+                                vehicleName={`${textValue(vehicle.make)} ${textValue(vehicle.model)} ${textValue(vehicle.derivative)}`}
                                 vehicleStatus={vehicle.status}
                                 onStatusChange={(newStatus) => setVehicle(v => v ? { ...v, status: newStatus } : v)}
                                 onNavigateToReserve={() => setActiveTab('reserveVehicle')}

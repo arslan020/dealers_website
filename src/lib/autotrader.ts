@@ -237,27 +237,30 @@ export class AutoTraderClient {
      *   makes → models → generations → derivatives (parallel generation fetches).
      */
     async searchDerivatives(params: {
-        make?: string; model?: string; generation?: string;
-        fuelType?: string; engineSize?: string; generationId?: string;
+        make?: string; model?: string; generation?: string; vehicleType?: string;
+        fuelType?: string; transmission?: string; trim?: string; generationId?: string;
     }) {
         if (!this.dealerId) await this.init();
+        const vehicleType = params.vehicleType || 'Car';
 
         // ── Fast path: generationId already known ────────────────────────────
         if (params.generationId) {
             const q: Record<string, string> = {
                 advertiserId: this.dealerId!,
                 generationId: params.generationId,
+                vehicleType,
             };
-            if (params.fuelType) q.fuelType = params.fuelType;
-            if (params.engineSize) q.engineSize = params.engineSize;
+            if (params.fuelType)    q.fuelType    = params.fuelType;
+            if (params.transmission) q.transmission = params.transmission;
+            if (params.trim)        q.trim         = params.trim;
             return this.get('/taxonomy/derivatives', q);
         }
 
         // ── Taxonomy chain: make → makeId → modelId → generationIds → derivatives ──
-        // Step 1: Find makeId
+        // Step 1: Find makeId — pass make filter directly to AT (handles misspellings)
         const makesData = await this.get('/taxonomy/makes', {
             advertiserId: this.dealerId!,
-            vehicleType: 'Car',
+            vehicleType,
             ...(params.make ? { make: params.make } : {}),
         });
         const makes: any[] = makesData?.makes || [];
@@ -266,10 +269,10 @@ export class AutoTraderClient {
             : makes[0];
         if (!makeMatch?.makeId) return { derivatives: [] };
 
-        // Step 2: Find modelId
+        // Step 2: Find modelId — pass model filter directly to AT
         const modelsData = await this.get('/taxonomy/models', {
             advertiserId: this.dealerId!,
-            vehicleType: 'Car',
+            vehicleType,
             makeId: makeMatch.makeId,
             ...(params.model ? { model: params.model } : {}),
         });
@@ -282,6 +285,7 @@ export class AutoTraderClient {
         // Step 3: Get generations for this model
         const gensData = await this.get('/taxonomy/generations', {
             advertiserId: this.dealerId!,
+            vehicleType,
             modelId: modelMatch.modelId,
         });
         const generations: any[] = gensData?.generations || [];
@@ -295,14 +299,17 @@ export class AutoTraderClient {
         const targetGens = (filteredGens.length > 0 ? filteredGens : generations).slice(0, 5);
 
         // Step 4: Fetch derivatives for all target generations in parallel
+        // AT valid filter params: fuelType, transmission, trim, vehicleType (not engineSize)
         const derivativeArrays = await Promise.all(
             targetGens.map(async (gen: any) => {
                 const q: Record<string, string> = {
                     advertiserId: this.dealerId!,
                     generationId: gen.generationId,
+                    vehicleType,
                 };
-                if (params.fuelType) q.fuelType = params.fuelType;
-                if (params.engineSize) q.engineSize = params.engineSize;
+                if (params.fuelType)     q.fuelType     = params.fuelType;
+                if (params.transmission) q.transmission  = params.transmission;
+                if (params.trim)         q.trim          = params.trim;
                 try {
                     const d = await this.get('/taxonomy/derivatives', q);
                     return (d?.derivatives || d?.derivative || []).map((deriv: any) => ({
@@ -318,6 +325,26 @@ export class AutoTraderClient {
 
         const allDerivatives = derivativeArrays.flat();
         return { derivatives: allDerivatives };
+    }
+
+    /** GET /taxonomy/features?derivativeId=&effectiveDate=&advertiserId= */
+    async getTaxonomyFeatures(derivativeId: string, effectiveDate: string) {
+        if (!this.dealerId) await this.init();
+        return this.get('/taxonomy/features', { derivativeId, effectiveDate, advertiserId: this.dealerId! });
+    }
+
+    /** GET /taxonomy/prices?derivativeId=&advertiserId=[&effectiveDate=] */
+    async getTaxonomyPrices(derivativeId: string, effectiveDate?: string) {
+        if (!this.dealerId) await this.init();
+        const q: Record<string, string> = { derivativeId, advertiserId: this.dealerId! };
+        if (effectiveDate) q.effectiveDate = effectiveDate;
+        return this.get('/taxonomy/prices', q);
+    }
+
+    /** GET /taxonomy/{facet}?generationId=&advertiserId= — e.g. fuelTypes, transmissionTypes, trims */
+    async getTaxonomyFacet(facet: string, filters: Record<string, string>) {
+        if (!this.dealerId) await this.init();
+        return this.get(`/taxonomy/${facet}`, { advertiserId: this.dealerId!, ...filters });
     }
 
     /**

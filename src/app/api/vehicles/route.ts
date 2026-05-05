@@ -42,12 +42,27 @@ async function getVehicles(req: NextRequest) {
         : localVehicles;
 
     // 2. Fetch AutoTrader Cache
+    // Helper to normalise AT fields that may arrive as { name: "..." } objects
+    const atStr = (val: any): string => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        if (typeof val === 'object') return val.name || val.value || '';
+        return String(val);
+    };
+
     let atVehicles: any[] = [];
     try {
         const cache = await AutoTraderStockCache.findOne({ tenantId });
         if (cache?.stock) {
             atVehicles = cache.stock.map((v: any) => ({
                 ...v,
+                make: atStr(v.make),
+                model: atStr(v.model),
+                derivative: atStr(v.derivative),
+                fuelType: atStr(v.fuelType),
+                transmission: atStr(v.transmission),
+                colour: atStr(v.colour),
+                bodyType: atStr(v.bodyType),
                 createdAt: v.createdAt || cache.fetchedAt?.toISOString() || null,
                 updatedAt: v.updatedAt || cache.fetchedAt?.toISOString() || null,
             }));
@@ -197,7 +212,16 @@ async function getVehicles(req: NextRequest) {
 }
 
 
-function buildAtStockPayload(vehicle: any, mongoId: string) {
+// Map local condition values → AT-valid values (AT uses 'Average', not 'Fair')
+const AT_CONDITION_MAP: Record<string, string> = {
+    'Excellent': 'Excellent', 'Good': 'Good', 'Fair': 'Average', 'Poor': 'Poor',
+};
+// Map local origin values → AT-valid values
+const AT_ORIGIN_MAP: Record<string, string> = {
+    'UK Vehicle': 'UK', 'Import': 'Non UK',
+};
+
+function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = false) {
     const featuresPayload = Array.isArray(vehicle.features) && vehicle.features.length > 0
         ? vehicle.features.map((f: any) => (typeof f === 'string' ? { name: f } : f))
         : undefined;
@@ -212,6 +236,7 @@ function buildAtStockPayload(vehicle: any, mongoId: string) {
             vehicleType: vehicle.vehicleType || 'Car',
             ...(vehicle.vrm                && { registration: vehicle.vrm.toUpperCase() }),
             ...(vehicle.vin                && { vin: vehicle.vin }),
+            ...(vehicle.engineNumber       && { engineNumber: vehicle.engineNumber }),
             ...(vehicle.derivativeId       && { derivativeId: vehicle.derivativeId }),
             ...(vehicle.mileage !== undefined && { odometerReadingMiles: Number(vehicle.mileage) }),
             ...(vehicle.colour             && { colour: vehicle.colour }),
@@ -226,6 +251,22 @@ function buildAtStockPayload(vehicle: any, mongoId: string) {
             ...(vehicle.drivetrain         && { drivetrain: vehicle.drivetrain }),
             ...(vehicle.driverPosition     && { steeringPosition: vehicle.driverPosition }),
             ...(vehicle.dateOfRegistration && { dateOfRegistration: vehicle.dateOfRegistration }),
+            ...(vehicle.plate              && { plate: String(vehicle.plate) }),
+            ...(vehicle.serviceHistory     && { serviceHistory: vehicle.serviceHistory }),
+            ...(vehicle.previousOwners !== undefined && { previousOwners: Number(vehicle.previousOwners) }),
+            ...(vehicle.motExpiry          && { motExpiryDate: vehicle.motExpiry }),
+            ...(vehicle.manufacturerWarrantyMonths !== undefined && { warrantyMonthsOnPurchase: Number(vehicle.manufacturerWarrantyMonths) }),
+            ...(vehicle.exteriorFinish     && { exteriorFinish: vehicle.exteriorFinish }),
+            ...(vehicle.emissionClass      && { emissionClass: vehicle.emissionClass }),
+            ...(vehicle.co2EmissionGPKM !== undefined && { co2EmissionGPKM: Number(vehicle.co2EmissionGPKM) }),
+            ...(vehicle.numberOfKeys !== undefined && { keys: Number(vehicle.numberOfKeys) }),
+            ...(vehicle.v5Present !== undefined && { v5Certificate: vehicle.v5Present }),
+            ...(vehicle.exDemo !== undefined && { exDemo: vehicle.exDemo }),
+            ...(vehicle.wheelchairAccessible !== undefined && { wheelchairAccessible: vehicle.wheelchairAccessible }),
+            ...(vehicle.origin && AT_ORIGIN_MAP[vehicle.origin] && { origin: AT_ORIGIN_MAP[vehicle.origin] }),
+            ...(vehicle.interiorCondition && AT_CONDITION_MAP[vehicle.interiorCondition] && { interiorCondition: AT_CONDITION_MAP[vehicle.interiorCondition] }),
+            ...(vehicle.tyreCondition     && AT_CONDITION_MAP[vehicle.tyreCondition]     && { tyreCondition: AT_CONDITION_MAP[vehicle.tyreCondition] }),
+            ...(vehicle.exteriorCondition && AT_CONDITION_MAP[vehicle.exteriorCondition] && { bodyCondition: AT_CONDITION_MAP[vehicle.exteriorCondition] }),
             ...(engineSizeNum && engineSizeNum > 100
                 ? { engineCapacityCC: engineSizeNum }
                 : engineSizeNum
@@ -233,11 +274,26 @@ function buildAtStockPayload(vehicle: any, mongoId: string) {
                 : {}),
         },
         adverts: {
+            // forecourtPrice is at adverts level (NOT inside retailAdverts) per AT docs
+            ...(vehicle.forecourtPrice && { forecourtPrice: { amountGBP: Number(vehicle.forecourtPrice) } }),
+            ...(vehicle.dueInDate      && { dueDate: vehicle.dueInDate }),
+            ...(vehicle.dateInStock    && { stockInDate: vehicle.dateInStock }),
+            ...(vehicle.includes12MonthsMot !== undefined && { twelveMonthsMot: vehicle.includes12MonthsMot }),
+            ...(vehicle.includesMotInsurance !== undefined && { motInsurance: vehicle.includesMotInsurance }),
+            ...(vehicle.vatStatus && { vatScheme: vehicle.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal' }),
             retailAdverts: {
                 suppliedPrice: { amountGBP: Number(vehicle.price) || 0 },
-                ...(vehicle.forecourtPrice && { forecourtPrice: { amountGBP: Number(vehicle.forecourtPrice) } }),
-                ...(vehicle.description    && { description: vehicle.description }),
+                ...(vehicle.priceOnApplication !== undefined && { priceOnApplication: vehicle.priceOnApplication }),
+                ...(vehicle.description      && { description: vehicle.description }),
+                ...(vehicle.description2     && { description2: vehicle.description2 }),
                 ...(vehicle.attentionGrabber && { attentionGrabber: vehicle.attentionGrabber }),
+                ...(isDraft && {
+                    autotraderAdvert:  { status: 'NOT_PUBLISHED' },
+                    advertiserAdvert:  { status: 'NOT_PUBLISHED' },
+                    locatorAdvert:     { status: 'NOT_PUBLISHED' },
+                    exportAdvert:      { status: 'NOT_PUBLISHED' },
+                    profileAdvert:     { status: 'NOT_PUBLISHED' },
+                }),
             },
         },
         ...(featuresPayload && { features: featuresPayload }),
@@ -282,13 +338,8 @@ async function createVehicle(req: NextRequest) {
         tenantId,
     });
 
-    // ─── Skip AutoTrader push for Draft vehicles ──────────────────────────────
-    if (vehicle.status === 'Draft') {
-        console.log('[AutoTrader] Skipping AT push — vehicle is Draft');
-        return NextResponse.json({ ok: true, vehicle });
-    }
-
-    // ─── Push to AutoTrader for non-Draft vehicles ────────────────────────────
+    // ─── Push to AutoTrader (Draft = FORECOURT + NOT_PUBLISHED, In Stock = FORECOURT + PUBLISHED) ──
+    const isDraft = vehicle.status === 'Draft';
     try {
         if (!vehicle.derivativeId) {
             console.warn('[AutoTrader] Missing derivativeId, skipping stock creation.');
@@ -298,14 +349,14 @@ async function createVehicle(req: NextRequest) {
         const client = new AutoTraderClient(tenantId);
         await client.init();
 
-        const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString());
+        const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString(), isDraft);
         const atResult = await client.createStock(atPayload);
         if (atResult?.metadata?.stockId) {
             const stockId = atResult.metadata.stockId;
             vehicle.stockId = stockId;
             vehicle.externalStockId = vehicle._id.toString();
             await vehicle.save();
-            console.log(`[AutoTrader] Created stock ${stockId} for vehicle ${vehicle._id}`);
+            console.log(`[AutoTrader] Created stock ${stockId} for vehicle ${vehicle._id} (draft: ${isDraft})`);
         }
     } catch (atError: any) {
         if (atError.status === 409 || atError.data?.message?.includes('stock item already exists')) {
@@ -475,6 +526,7 @@ async function updateVehicle(req: NextRequest) {
     // 2. Sync Price (£75 minimum enforced)
     if (vehicle.stockId && (updateData.price !== undefined || updateData.forecourtPrice !== undefined)) {
         const retailAdverts: Record<string, any> = {};
+        const advertsTopLevel: Record<string, any> = {};
 
         if (updateData.price !== undefined) {
             if (Number(updateData.price) < 75) {
@@ -484,16 +536,38 @@ async function updateVehicle(req: NextRequest) {
             }
         }
 
+        // forecourtPrice is at adverts level (NOT inside retailAdverts) per AT docs
         if (updateData.forecourtPrice !== undefined && Number(updateData.forecourtPrice) > 0) {
-            retailAdverts.forecourtPrice = { amountGBP: Number(updateData.forecourtPrice) };
+            advertsTopLevel.forecourtPrice = { amountGBP: Number(updateData.forecourtPrice) };
         }
 
-        if (Object.keys(retailAdverts).length > 0) {
+        if (Object.keys(retailAdverts).length > 0) advertsTopLevel.retailAdverts = retailAdverts;
+        if (Object.keys(advertsTopLevel).length > 0) {
             try {
-                await client.updateStock(vehicle.stockId, { adverts: { retailAdverts } });
-                console.log('[AutoTrader] Price synced:', retailAdverts);
+                await client.updateStock(vehicle.stockId, { adverts: advertsTopLevel });
+                console.log('[AutoTrader] Price synced:', advertsTopLevel);
             } catch (atError) {
                 console.error('[AutoTrader Price Sync Error]', atError);
+            }
+        }
+    }
+
+    // 2b. Sync advert-level availability/settings fields
+    if (vehicle.stockId) {
+        const atAdverts: Record<string, any> = {};
+        if (updateData.includes12MonthsMot !== undefined) atAdverts.twelveMonthsMot = updateData.includes12MonthsMot;
+        if (updateData.includesMotInsurance !== undefined) atAdverts.motInsurance = updateData.includesMotInsurance;
+        if (updateData.dueInDate !== undefined) atAdverts.dueDate = updateData.dueInDate || null;
+        if (updateData.dateInStock !== undefined) atAdverts.stockInDate = updateData.dateInStock || null;
+        if (updateData.vatStatus !== undefined) {
+            atAdverts.vatScheme = updateData.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal';
+        }
+        if (Object.keys(atAdverts).length > 0) {
+            try {
+                await client.updateStock(vehicle.stockId, { adverts: atAdverts });
+                console.log('[AutoTrader] Advert settings synced:', Object.keys(atAdverts));
+            } catch (atError) {
+                console.error('[AutoTrader Advert Settings Sync Error]', atError);
             }
         }
     }
@@ -572,20 +646,27 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 4. Sync vehicle fields (colour, mileage, fuelType, transmission, bodyType)
+    // 4. Sync vehicle fields
     if (vehicle.stockId) {
         const vehicleFieldMap: Record<string, string> = {
-            colour:       'colour',
-            mileage:      'odometerReadingMiles',
-            fuelType:     'fuelType',
-            transmission: 'transmissionType',
-            bodyType:     'bodyType',
+            colour:               'colour',
+            mileage:              'odometerReadingMiles',
+            fuelType:             'fuelType',
+            transmission:         'transmissionType',
+            bodyType:             'bodyType',
             // Note: make, model, derivative, generation are read-only on AT — derived from derivativeId
             // Only these direct vehicle fields are safely patchable per AT docs
-            year:         'yearOfManufacture',
-            vin:          'vin',
-            doors:        'doors',
-            seats:        'seats',
+            year:                 'yearOfManufacture',
+            vin:                  'vin',
+            doors:                'doors',
+            seats:                'seats',
+            // ── Newly synced fields ───────────────────────────────────────────
+            engineNumber:         'engineNumber',
+            plate:                'plate',
+            emissionClass:        'emissionClass',
+            co2EmissionGPKM:      'co2EmissionGPKM',
+            exteriorFinish:       'exteriorFinish',
+            wheelchairAccessible: 'wheelchairAccessible',
         };
 
         const vehicleUpdate: Record<string, any> = {};
@@ -593,11 +674,26 @@ async function updateVehicle(req: NextRequest) {
             if (updateData[localKey] !== undefined) {
                 vehicleUpdate[atKey] = localKey === 'mileage'
                     ? Number(updateData[localKey])
-                    : localKey === 'year'
+                    : localKey === 'year' || localKey === 'plate'
                     ? String(updateData[localKey])
                     : updateData[localKey];
             }
         }
+
+        // Fields that require value transformation before sending to AT
+        if (updateData.serviceHistory !== undefined)         vehicleUpdate.serviceHistory          = updateData.serviceHistory || null;
+        if (updateData.previousOwners !== undefined)         vehicleUpdate.previousOwners          = Number(updateData.previousOwners);
+        if (updateData.motExpiry !== undefined)              vehicleUpdate.motExpiryDate           = updateData.motExpiry || null;
+        if (updateData.numberOfKeys !== undefined)           vehicleUpdate.keys                    = Number(updateData.numberOfKeys);
+        if (updateData.v5Present !== undefined)              vehicleUpdate.v5Certificate           = updateData.v5Present;
+        if (updateData.exDemo !== undefined)                 vehicleUpdate.exDemo                  = updateData.exDemo;
+        if (updateData.manufacturerWarrantyMonths !== undefined) vehicleUpdate.warrantyMonthsOnPurchase = Number(updateData.manufacturerWarrantyMonths);
+        // Origin: 'UK Vehicle' → 'UK', 'Import' → 'Non UK'
+        if (updateData.origin !== undefined)                 vehicleUpdate.origin                  = AT_ORIGIN_MAP[updateData.origin] ?? updateData.origin;
+        // Conditions: 'Fair' → 'Average' (AT doesn't accept 'Fair')
+        if (updateData.interiorCondition !== undefined)      vehicleUpdate.interiorCondition       = AT_CONDITION_MAP[updateData.interiorCondition] ?? updateData.interiorCondition;
+        if (updateData.tyreCondition !== undefined)          vehicleUpdate.tyreCondition           = AT_CONDITION_MAP[updateData.tyreCondition]     ?? updateData.tyreCondition;
+        if (updateData.exteriorCondition !== undefined)      vehicleUpdate.bodyCondition           = AT_CONDITION_MAP[updateData.exteriorCondition] ?? updateData.exteriorCondition;
 
         if (Object.keys(vehicleUpdate).length > 0) {
             try {
@@ -609,12 +705,13 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 5. Sync advert content (description, description2, attentionGrabber)
+    // 5. Sync advert content (description, description2, attentionGrabber, priceOnApplication)
     if (vehicle.stockId) {
         const advertUpdate: Record<string, any> = {};
-        if (updateData.description !== undefined) advertUpdate.description = updateData.description;
-        if (updateData.description2 !== undefined) advertUpdate.description2 = updateData.description2;
-        if (updateData.attentionGrabber !== undefined) advertUpdate.attentionGrabber = updateData.attentionGrabber;
+        if (updateData.description !== undefined)        advertUpdate.description        = updateData.description;
+        if (updateData.description2 !== undefined)       advertUpdate.description2       = updateData.description2;
+        if (updateData.attentionGrabber !== undefined)   advertUpdate.attentionGrabber   = updateData.attentionGrabber;
+        if (updateData.priceOnApplication !== undefined) advertUpdate.priceOnApplication = updateData.priceOnApplication;
 
         if (Object.keys(advertUpdate).length > 0) {
             try {

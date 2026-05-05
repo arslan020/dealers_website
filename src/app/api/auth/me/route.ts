@@ -23,10 +23,15 @@ async function meHandler(req: NextRequest) {
     }
 
     let tenantName: string | null = null;
+    let dealerPostcode: string | null = null;
     if (session.tenantId) {
         await connectToDatabase();
-        const tenant = await Tenant.findById(session.tenantId).select('name');
+        const tenant = await Tenant.findById(session.tenantId).select('name autoTraderConfig businessProfile');
         tenantName = tenant?.name ?? null;
+        dealerPostcode =
+            (tenant as any)?.autoTraderConfig?.postcode ||
+            (tenant as any)?.businessProfile?.postcode ||
+            null;
     }
 
     return NextResponse.json({
@@ -37,6 +42,7 @@ async function meHandler(req: NextRequest) {
             tenantId: session.tenantId ?? null,
             tenantName,
             name: session.name ?? null,
+            dealerPostcode,
         },
     });
 }

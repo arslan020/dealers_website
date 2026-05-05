@@ -5,11 +5,11 @@ import User from '@/models/User';
 import { withErrorHandler } from '@/lib/api-handler';
 import mongoose from 'mongoose';
 
-async function getJobHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function getJobHandler(req: NextRequest, { params }: { params?: Promise<{ id: string }> }) {
     const tenantId = req.headers.get('x-tenant-id');
     if (!tenantId) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
 
-    const { id } = await params;
+    const { id } = await params!;
     if (!mongoose.isValidObjectId(id)) return NextResponse.json({ ok: false, error: 'Invalid ID' }, { status: 400 });
 
     await connectToDatabase();
@@ -85,11 +85,11 @@ async function getJobHandler(req: NextRequest, { params }: { params: Promise<{ i
     });
 }
 
-async function patchJobHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function patchJobHandler(req: NextRequest, { params }: { params?: Promise<{ id: string }> }) {
     const tenantId = req.headers.get('x-tenant-id');
     if (!tenantId) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
 
-    const { id } = await params;
+    const { id } = await params!;
     if (!mongoose.isValidObjectId(id)) return NextResponse.json({ ok: false, error: 'Invalid ID' }, { status: 400 });
 
     await connectToDatabase();
@@ -122,11 +122,11 @@ async function patchJobHandler(req: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ ok: true });
 }
 
-async function deleteJobHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function deleteJobHandler(req: NextRequest, { params }: { params?: Promise<{ id: string }> }) {
     const tenantId = req.headers.get('x-tenant-id');
     if (!tenantId) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
 
-    const { id } = await params;
+    const { id } = await params!;
     if (!mongoose.isValidObjectId(id)) return NextResponse.json({ ok: false, error: 'Invalid ID' }, { status: 400 });
 
     await connectToDatabase();

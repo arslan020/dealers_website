@@ -5,11 +5,12 @@ import { AutoTraderClient } from '@/lib/autotrader';
 
 const CONDITION_MAP: Record<string, string> = {
     Excellent: 'EXCELLENT',
+    Great: 'GREAT',
     Good: 'GOOD',
     Average: 'FAIR',
+    Fair: 'FAIR',
     Poor: 'POOR',
     New: 'EXCELLENT',
-    Fair: 'FAIR',
 };
 
 async function getValuationTrend(req: NextRequest) {
@@ -19,9 +20,15 @@ async function getValuationTrend(req: NextRequest) {
         return NextResponse.json({ ok: false, error: { message: 'Unauthorized.' } }, { status: 401 });
     }
 
-    const { derivativeId, firstRegistrationDate, mileage, condition } = await req.json();
+    const body = await req.json();
+    const { derivativeId, mileage, condition, features } = body;
+    const firstRegistrationDate = body.firstRegistrationDate || body.registeredDate;
+
     if (!derivativeId || !mileage) {
         return NextResponse.json({ ok: false, error: { message: 'derivativeId and mileage required.' } }, { status: 400 });
+    }
+    if (!firstRegistrationDate) {
+        return NextResponse.json({ ok: false, error: { message: 'firstRegistrationDate required.' } }, { status: 400 });
     }
 
     const conditionRating = CONDITION_MAP[condition] ?? 'GOOD';
@@ -39,19 +46,23 @@ async function getValuationTrend(req: NextRequest) {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        const payload = {
+        const payload: any = {
             vehicle: {
                 derivativeId,
-                firstRegistrationDate: firstRegistrationDate || '2000-01-01',
+                firstRegistrationDate,
             },
             conditionRating,
             valuations: {
-                markets: ['retail', 'trade', 'partExchange'],
+                markets: ['retail', 'trade', 'partExchange', 'private'],
                 frequency: 'month',
                 start: { date: fmt(startDate), odometerReadingMiles: startMileage },
                 end: { date: fmt(now), odometerReadingMiles },
             },
         };
+        // features: array of { name } — adjusts valuation for vehicle spec
+        if (Array.isArray(features)) {
+            payload.features = features.map((f: any) => ({ name: typeof f === 'string' ? f : f.name }));
+        }
 
         const data = await client.post('/valuations/trends', payload, { advertiserId: client.dealerId! });
 

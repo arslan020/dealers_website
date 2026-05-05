@@ -27,6 +27,7 @@ type VehicleData = {
     registeredDate: string;
     derivativeId?: string;
     rawResponse?: any;
+    technicalSpecs?: Record<string, any>;
 };
 
 type ValuationResult = {
@@ -37,9 +38,10 @@ type ValuationResult = {
 };
 
 type MetricsResult = {
-    rating?: { value: number } | null;
-    daysToSell?: { value: number } | null;
+    rating?: number | null;
+    daysToSell?: number | null;
     vehicleMetrics?: {
+        liveRetailPercentage?: number;
         retail?: { supply?: { value: number }; demand?: { value: number }; marketCondition?: { value: number } };
     } | null;
 };
@@ -167,7 +169,7 @@ export default function QuickCheckPage() {
     const [upgradeError, setUpgradeError] = useState('');
     const [stdFeatures, setStdFeatures] = useState<{ name: string; category: string }[]>([]);
     const [optExtras, setOptExtras] = useState<{ name: string; category: string; price: number | null }[]>([]);
-    const [featuresLoading, setFeaturesLoading] = useState(false);
+    const featuresLoading = loading;
     const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set());
     const [addingVehicle, setAddingVehicle] = useState(false);
     const [addVehicleError, setAddVehicleError] = useState('');
@@ -179,7 +181,7 @@ export default function QuickCheckPage() {
         try {
             const motExpiry = checkData?.motTests?.find(t => t.testResult === 'Passed' && t.expiryDate)?.expiryDate;
             const previousOwners = checkData?.history?.previousOwners ?? checkData?.check?.previousOwners ?? undefined;
-            const vin = checkData?.vin ?? undefined;
+            const vin = checkData?.vin || vehicle.vin || undefined;
 
             const body = {
                 make: vehicle.make,
@@ -209,6 +211,7 @@ export default function QuickCheckPage() {
                 primaryImage: '',
                 websitePublished: false,
                 status: 'Draft',
+                technicalSpecs: vehicle.technicalSpecs || {},
             };
 
             const res = await fetch('/api/vehicles', {
@@ -273,6 +276,9 @@ export default function QuickCheckPage() {
                     firstRegistrationDate: vehicle.registeredDate,
                     mileage: mileage.trim(),
                     condition,
+                    features: selectedExtras.size > 0
+                        ? [...selectedExtras].map(name => ({ name }))
+                        : [],
                 }),
             });
             const data = await res.json();
@@ -305,11 +311,20 @@ export default function QuickCheckPage() {
                     condition,
                     derivativeId: vehicle.derivativeId,
                     registeredDate: vehicle.registeredDate,
+                    features: selectedExtras.size > 0
+                        ? [...selectedExtras].map(name => ({ name }))
+                        : [],
                 }),
             });
             const data = await res.json();
             if (data.ok) {
-                setValuation(data.valuations);
+                const arr: any[] = data.valuations ?? [];
+                const obj: ValuationResult = {};
+                for (const v of arr) {
+                    const key = v.valuationType === 'PartExchange' ? 'partExchange' : v.valuationType.toLowerCase();
+                    (obj as any)[key] = { amountGBP: v.amountGBP };
+                }
+                setValuation(obj);
                 setMetrics(data.metrics ?? null);
             } else {
                 setValuationError(data.error?.message || 'Could not fetch valuation.');
@@ -334,12 +349,14 @@ export default function QuickCheckPage() {
             const data = await res.json();
             if (data.ok) {
                 setVehicle(data.vehicle);
-                
+                setStdFeatures(data.standardFeatures || []);
+                setOptExtras(data.optionalExtras || []);
+
                 // Fetch full derivative details if we have the derivativeId
                 if (data.vehicle?.derivativeId) {
                     fetch(`/api/vehicles/derivatives?id=${data.vehicle.derivativeId}`)
                         .then(r => r.json())
-                        .then(d => { if (d.ok) setDerivativeData(d.derivative?.vehicle || d.derivative || null); })
+                        .then(d => { if (d.ok) setDerivativeData(d.derivative || null); })
                         .catch(() => {});
                 }
 
@@ -348,18 +365,6 @@ export default function QuickCheckPage() {
                     .then(r => r.json())
                     .then(d => { if (d.ok) setCheckData({ motTests: d.motTests, dvlaTax: d.dvlaTax, history: d.history, check: d.check, vin: d.vehicle?.vin || null, engineNumber: d.vehicle?.engineNumber || null, fetchedAt: d._fetchedAt, limitedData: d.limitedData }); })
                     .catch(() => { });
-                // Fetch standard features + optional extras in background
-                setFeaturesLoading(true);
-                fetch(`/api/vehicles/optional-extras?vrm=${encodeURIComponent(vrm)}`)
-                    .then(r => r.json())
-                    .then(d => {
-                        if (d.ok) {
-                            setStdFeatures(d.standardFeatures || []);
-                            setOptExtras(d.optionalExtras || []);
-                        }
-                    })
-                    .catch(() => { })
-                    .finally(() => setFeaturesLoading(false));
             } else {
                 setError(data.error?.message || 'Could not find vehicle.');
             }
@@ -625,7 +630,7 @@ export default function QuickCheckPage() {
                                     {valuationLoading ? <LoadingSpinner /> : 'Get Valuation'}
                                 </button>
                             </div>
-                            <p className="text-[12px] text-slate-400">Note, <span className="text-[#8b5cf6] cursor-pointer hover:underline">selected optional extras</span> may affect valuation.</p>
+                            <p className="text-[12px] text-slate-400">Note, <span className="text-[#8b5cf6] cursor-pointer hover:underline" onClick={() => document.getElementById('extras')?.scrollIntoView({ behavior: 'smooth' })}>selected optional extras</span> may affect valuation.</p>
 
                             {/* Error */}
                             {valuationError && (
@@ -658,12 +663,15 @@ export default function QuickCheckPage() {
                                         </div>
                                     </div>
 
-                                    {/* 3 main cards */}
-                                    <div className="grid grid-cols-3 gap-3">
+                                    {/* Valuation cards */}
+                                    <div className={`grid gap-3 ${showPrivate && valuation.private?.amountGBP != null ? 'grid-cols-4' : 'grid-cols-3'}`}>
                                         {[
                                             { label: 'Trade Valuation', amount: valuation.trade?.amountGBP },
                                             { label: 'Part Ex Valuation', amount: valuation.partExchange?.amountGBP },
                                             { label: 'Retail Valuation', amount: valuation.retail?.amountGBP },
+                                            ...(showPrivate && valuation.private?.amountGBP != null
+                                                ? [{ label: 'Private Valuation', amount: valuation.private.amountGBP }]
+                                                : []),
                                         ].map(card => (
                                             <div key={card.label} className="bg-teal-500 rounded-xl p-4 text-white text-center">
                                                 <div className="flex items-center justify-center gap-1.5 mb-2 opacity-80">
@@ -678,14 +686,6 @@ export default function QuickCheckPage() {
                                             </div>
                                         ))}
                                     </div>
-
-                                    {/* Private valuation */}
-                                    {showPrivate && valuation.private?.amountGBP != null && (
-                                        <div className="bg-teal-600 rounded-xl p-4 text-white text-center animate-in fade-in duration-200">
-                                            <p className="text-[11px] opacity-80 mb-1">Private Valuation</p>
-                                            <p className="text-2xl font-black">£{valuation.private.amountGBP.toLocaleString()}</p>
-                                        </div>
-                                    )}
 
                                     {/* Show Valuation Trend */}
                                     <button
@@ -744,33 +744,6 @@ export default function QuickCheckPage() {
                                 </div>
                             )}
 
-                            {/* Vehicle Metrics */}
-                            {metrics && (
-                                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 space-y-3 animate-in fade-in duration-300">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-0.5">
-                                                <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-                                                <span className="text-sm font-bold text-slate-700">Vehicle Metrics</span>
-                                            </div>
-                                            <p className="text-xs text-slate-400 ml-6">Market insights powered by AutoTrader.</p>
-                                        </div>
-                                        <button onClick={() => setMetrics(null)} className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
-                                    </div>
-                                    {metrics.rating?.value != null && (
-                                        <div className="bg-teal-500 rounded-xl p-4 text-white text-center">
-                                            <p className="text-xs opacity-80 mb-1">Retail Rating</p>
-                                            <p className="text-3xl font-black">{Math.round(metrics.rating.value)} <span className="text-base font-semibold opacity-70">/ 100</span></p>
-                                        </div>
-                                    )}
-                                    {metrics.daysToSell?.value != null && (
-                                        <div className="flex justify-between items-center px-2">
-                                            <span className="text-xs text-slate-500">Est. Days to Sell</span>
-                                            <span className="text-sm font-bold text-slate-800">{Math.round(metrics.daysToSell.value)} days</span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     </section>
 
@@ -1034,10 +1007,10 @@ export default function QuickCheckPage() {
                                                     ))}
                                                 </div>
                                                 <div className="mt-3 flex justify-end">
-                                                    <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-white font-semibold text-xs hover:bg-slate-700 transition-all">
+                                                    <a href="https://www.gov.uk/check-tax-rates-new-unregistered-cars" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-white font-semibold text-xs hover:bg-slate-700 transition-all">
                                                         Calculate Tax Cost
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-                                                    </button>
+                                                    </a>
                                                 </div>
                                             </div>
                                         );

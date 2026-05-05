@@ -44,10 +44,52 @@ export interface IVehicle {
     fuelType?: string;
     transmission?: string;
     bodyType?: string;
+    cabType?: string;
+    wheelbaseType?: string;
+    roofHeightType?: string;
     seats?: number;
     doors?: number;
     driverPosition?: string;
     drivetrain?: string;
+    wheelchairAccessible?: boolean;
+    plate?: string;
+    cylinders?: number;
+    valves?: number;
+    engineTorqueNM?: number;
+    enginePowerBHP?: number;
+    enginePowerPS?: number;
+    badgeEngineSizeLitres?: number;
+    fuelCapacityLitres?: number;
+    batteryRangeMiles?: number;
+    batteryCapacityKWH?: number;
+    batteryUsableCapacityKWH?: number;
+    emissionClass?: string;
+    topSpeedMPH?: number;
+    zeroToSixtyMPHSeconds?: number;
+    zeroToOneHundredKMPHSeconds?: number;
+    fuelEconomyNEDCExtraUrbanMPG?: number;
+    fuelEconomyNEDCUrbanMPG?: number;
+    fuelEconomyNEDCCombinedMPG?: number;
+    fuelEconomyWLTPLowMPG?: number;
+    fuelEconomyWLTPMediumMPG?: number;
+    fuelEconomyWLTPHighMPG?: number;
+    fuelEconomyWLTPExtraHighMPG?: number;
+    fuelEconomyWLTPCombinedMPG?: number;
+    insuranceGroup?: string;
+    insuranceSecurityCode?: string;
+    lengthMM?: number;
+    heightMM?: number;
+    widthMM?: number;
+    minimumKerbWeightKG?: number;
+    grossVehicleWeightKG?: number;
+    payloadLengthMM?: number;
+    payloadHeightMM?: number;
+    payloadWidthMM?: number;
+    payloadWeightKG?: number;
+    bootSpaceSeatsUpLitres?: number;
+    bootSpaceSeatsDownLitres?: number;
+    co2EmissionGPKM?: number;
+    wheelbaseMM?: number;
     colour?: string;
     colourName?: string;
     exteriorFinish?: string;
@@ -90,6 +132,42 @@ export interface IVehicle {
     };
     exDemo?: boolean;
     atPriceOnApplication?: boolean;
+    purchaseDate?: string;
+    supplierName?: string;
+    supplierInvoiceNo?: string;
+    vatType?: 'Margin' | 'Standard' | 'Zero Rated';
+    purchaseVatAmount?: number;
+    fundingProvider?: string;
+    fundingAmount?: number;
+    vehicleAdditionalCosts?: Array<{
+        id: string;
+        category: string;
+        date: string;
+        supplier: string;
+        reference: string;
+        cost: number;
+        vatRate: number;
+        vat: number;
+        total: number;
+    }>;
+    referenceId?: string;
+    engineNumber?: string;
+    newKeeperReference?: string;
+    keyReference?: string;
+    dueInDate?: string;
+    dateOnForecourt?: string;
+    location?: string;
+    origin?: 'UK Vehicle' | 'Import';
+    saleOrReturn?: boolean;
+    demonstrator?: boolean;
+    trade?: boolean;
+    stockNotes?: string;
+    vatStatus?: 'Marginal' | 'VAT Qualifying';
+    reservePaymentAmount?: number;
+    quantityAvailable?: number;
+    dateInStock?: string;
+    technicalSpecs?: Record<string, any>;
+    workflowStages?: Record<string, { completed: boolean; date?: string; notes?: string }>;
     tenantId: mongoose.Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
@@ -144,10 +222,52 @@ const VehicleSchema = new Schema<IVehicle>(
         fuelType: { type: String, trim: true },
         transmission: { type: String, trim: true },
         bodyType: { type: String, trim: true },
+        cabType: { type: String, trim: true },
+        wheelbaseType: { type: String, trim: true },
+        roofHeightType: { type: String, trim: true },
         seats: { type: Number },
         doors: { type: Number },
         driverPosition: { type: String, trim: true },
         drivetrain: { type: String, trim: true },
+        wheelchairAccessible: { type: Boolean },
+        plate: { type: String, trim: true },
+        cylinders: { type: Number },
+        valves: { type: Number },
+        engineTorqueNM: { type: Number },
+        enginePowerBHP: { type: Number },
+        enginePowerPS: { type: Number },
+        badgeEngineSizeLitres: { type: Number },
+        fuelCapacityLitres: { type: Number },
+        batteryRangeMiles: { type: Number },
+        batteryCapacityKWH: { type: Number },
+        batteryUsableCapacityKWH: { type: Number },
+        emissionClass: { type: String, trim: true },
+        topSpeedMPH: { type: Number },
+        zeroToSixtyMPHSeconds: { type: Number },
+        zeroToOneHundredKMPHSeconds: { type: Number },
+        fuelEconomyNEDCExtraUrbanMPG: { type: Number },
+        fuelEconomyNEDCUrbanMPG: { type: Number },
+        fuelEconomyNEDCCombinedMPG: { type: Number },
+        fuelEconomyWLTPLowMPG: { type: Number },
+        fuelEconomyWLTPMediumMPG: { type: Number },
+        fuelEconomyWLTPHighMPG: { type: Number },
+        fuelEconomyWLTPExtraHighMPG: { type: Number },
+        fuelEconomyWLTPCombinedMPG: { type: Number },
+        insuranceGroup: { type: String, trim: true },
+        insuranceSecurityCode: { type: String, trim: true },
+        lengthMM: { type: Number },
+        heightMM: { type: Number },
+        widthMM: { type: Number },
+        minimumKerbWeightKG: { type: Number },
+        grossVehicleWeightKG: { type: Number },
+        payloadLengthMM: { type: Number },
+        payloadHeightMM: { type: Number },
+        payloadWidthMM: { type: Number },
+        payloadWeightKG: { type: Number },
+        bootSpaceSeatsUpLitres: { type: Number },
+        bootSpaceSeatsDownLitres: { type: Number },
+        co2EmissionGPKM: { type: Number },
+        wheelbaseMM: { type: Number },
         colour: { type: String, trim: true },
         colourName: { type: String, trim: true },
         exteriorFinish: { type: String, trim: true },
@@ -182,6 +302,32 @@ const VehicleSchema = new Schema<IVehicle>(
         excludeFromAdvert: { type: Schema.Types.Mixed, default: {} },
         exDemo: { type: Boolean, default: false },
         atPriceOnApplication: { type: Boolean, default: false },
+        purchaseDate: { type: String, trim: true },
+        supplierName: { type: String, trim: true },
+        supplierInvoiceNo: { type: String, trim: true },
+        vatType: { type: String, enum: ['Margin', 'Standard', 'Zero Rated'] },
+        purchaseVatAmount: { type: Number },
+        fundingProvider: { type: String, trim: true },
+        fundingAmount: { type: Number },
+        vehicleAdditionalCosts: { type: Schema.Types.Mixed, default: [] },
+        referenceId: { type: String, trim: true },
+        engineNumber: { type: String, trim: true },
+        newKeeperReference: { type: String, trim: true },
+        keyReference: { type: String, trim: true },
+        dueInDate: { type: String, trim: true },
+        dateOnForecourt: { type: String, trim: true },
+        location: { type: String, trim: true },
+        origin: { type: String, enum: ['UK Vehicle', 'Import'], default: 'UK Vehicle' },
+        saleOrReturn: { type: Boolean, default: false },
+        demonstrator: { type: Boolean, default: false },
+        trade: { type: Boolean, default: false },
+        stockNotes: { type: String, trim: true },
+        vatStatus: { type: String, enum: ['Marginal', 'VAT Qualifying'], default: 'Marginal' },
+        reservePaymentAmount: { type: Number },
+        quantityAvailable: { type: Number },
+        dateInStock: { type: String, trim: true },
+        technicalSpecs: { type: Schema.Types.Mixed, default: {} },
+        workflowStages: { type: Schema.Types.Mixed, default: {} },
         tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     },
     { timestamps: true }

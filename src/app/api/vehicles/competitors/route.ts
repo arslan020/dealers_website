@@ -5,6 +5,7 @@ import { AutoTraderClient } from '@/lib/autotrader';
 
 const AUTOTRADER_BASE_URL = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
 
+
 /** Sample data shown when AutoTrader Search capability is not enabled on this account */
 const SAMPLE_COMPETITORS = [
     { registration: 'SJ21 KPF', price: 28495, valuation: 27800, trim: 'Sport', derivative: '2.0 TDI Sport 5dr S Tronic', engine: '2.0L', fuelType: 'Diesel', transmission: 'Automatic', mileage: 21400, daysOnForecourt: 18, distance: 12, year: 2021, priceIndicatorRating: 'GOOD' },
@@ -49,9 +50,6 @@ async function getCompetitors(req: NextRequest) {
                 competitors: 'true',
             });
 
-            console.log('[Competitors] vehicleData keys:', Object.keys(vehicleData || {}));
-            console.log('[Competitors] vehicle keys:', Object.keys(vehicleData?.vehicle || {}));
-
             // The competitor URL can be at different paths depending on AT response shape
             competitorUrl =
                 vehicleData?.links?.competitors?.href
@@ -62,17 +60,13 @@ async function getCompetitors(req: NextRequest) {
                 ?? vehicleData?.competitorUrl
                 ?? undefined;
 
-            console.log('[Competitors] competitorUrl found:', competitorUrl ? 'YES' : 'NO', competitorUrl?.slice(0, 80));
         } catch (e: any) {
             console.error('[Competitors] VRM lookup failed:', e.message);
         }
 
         // Step 2: Build search URL
-        //
-        // MotorDesk behaviour: competitor searches are driven by make/model taxonomy + user filters,
-        // not tightly anchored to the current VRM's competitorUrl (which can bias results to the
-        // current derivative/fuel and cause "0 results" when filters change).
         const accessToken = await (client as any).getAccessToken();
+
 
         let searchUrl: URL;
 
@@ -88,8 +82,6 @@ async function getCompetitors(req: NextRequest) {
             (v.dateOfRegistration ? new Date(v.dateOfRegistration).getFullYear() : undefined) ||
             searchParams.get('year') ||
             '';
-
-        console.log('[Competitors] Base search — standardMake:', standardMake, 'standardModel:', standardModel, 'year:', year, 'competitorUrl:', competitorUrl ? 'YES' : 'NO');
 
         if (!standardMake || !standardModel) {
             // If we can't determine taxonomy, fall back to competitorUrl if present
@@ -126,18 +118,6 @@ async function getCompetitors(req: NextRequest) {
             searchUrl.searchParams.set('valuations', 'true');
         }
 
-        // Distance is only returned when AutoTrader can calculate it (usually needs postcode + radius).
-        // If caller didn't provide postcode, try to source a sensible default.
-        if (!searchUrl.searchParams.get('postcode')) {
-            const hintedPostcode =
-                searchParams.get('postcode')
-                || (client as any).postcode
-                || vehicleData?.vehicle?.postcode
-                || vehicleData?.advertiser?.postcode
-                || '';
-            if (hintedPostcode) searchUrl.searchParams.set('postcode', String(hintedPostcode));
-        }
-
         // Vehicle metrics sometimes carry valuation depending on endpoint/capabilities
         if (!searchUrl.searchParams.has('vehicleMetrics')) {
             searchUrl.searchParams.set('vehicleMetrics', 'true');
@@ -158,8 +138,6 @@ async function getCompetitors(req: NextRequest) {
             minYear:       'minManufacturedYear',
             maxYear:       'maxManufacturedYear',
             condition:     'ownershipCondition',
-            distance:      'distance',
-            postcode:      'postcode',
             sort:          'sort',
         };
 
@@ -170,11 +148,6 @@ async function getCompetitors(req: NextRequest) {
             }
         }
 
-        // AT requires postcode when distance is set — drop distance if no postcode available
-        if (searchUrl.searchParams.has('distance') && !searchUrl.searchParams.get('postcode')) {
-            searchUrl.searchParams.delete('distance');
-        }
-
         // MotorDesk-style: fetch multiple pages so the UI can show >20 results.
         // AT competitor search is typically 20 per page, up to 10 pages (200 total).
         const requestedTotal = Number(searchParams.get('pageSize') || '50'); // UI sends 25; treat as desired total results
@@ -183,8 +156,6 @@ async function getCompetitors(req: NextRequest) {
         searchUrl.searchParams.set('pageSize', String(perPage));
         searchUrl.searchParams.set('page', '1');
         searchUrl.searchParams.set('advertiserId', client.dealerId || '');
-
-        console.log('[Competitors] Final search URL:', searchUrl.toString().slice(0, 120));
 
         const vehicleForFallback = vehicleData?.vehicle || {};
 
@@ -285,12 +256,8 @@ async function getCompetitors(req: NextRequest) {
                 'minManufacturedYear',
                 'maxManufacturedYear',
             ].forEach(k => relaxedUrl.searchParams.delete(k));
-            // distance=0 means national on AT, but only send if postcode present
-            if (relaxedUrl.searchParams.get('postcode')) {
-                relaxedUrl.searchParams.set('distance', '0');
-            } else {
-                relaxedUrl.searchParams.delete('distance');
-            }
+            // Drop the radius filter so AT returns national results — postcode stays so each result gets distance data
+            relaxedUrl.searchParams.delete('distance');
             relaxedUrl.searchParams.set('pageSize', String(perPage));
             relaxedUrl.searchParams.set('page', '1');
 
@@ -366,8 +333,6 @@ async function getCompetitors(req: NextRequest) {
                 } catch { /* ignore */ }
             }
         }
-        console.log('[Competitors] Total results from AT (aggregated):', aggregated.length);
-
         const results: any[] = aggregated.slice(0, desiredTotal);
         const minEngineSize = Number(searchParams.get('minEngineSize') || '0');
         const maxEngineSize = Number(searchParams.get('maxEngineSize') || '0');
@@ -420,7 +385,7 @@ async function getCompetitors(req: NextRequest) {
                     : (typeof valCandidate === 'string' && valCandidate.trim() !== '' ? Number(valCandidate) : null);
 
             const engineSize = v.badgeEngineSizeLitres
-                ? `${v.badgeEngineSizeLitres}L`
+                ? `${Number(v.badgeEngineSizeLitres).toFixed(1)}L`
                 : v.engineCapacityCC
                 ? `${(v.engineCapacityCC / 1000).toFixed(1)}L`
                 : '—';
@@ -466,7 +431,7 @@ async function getCompetitors(req: NextRequest) {
                 condition:           v.condition || item?.condition || null,
                 mileage:             v.odometerReadingMiles ?? null,
                 daysOnForecourt,
-                distance:            item.distance?.miles ?? null,
+                distance:            null,
                 optionalExtrasCount: featuresArr.length,
                 fullDealershipHistory,
                 options: featuresArr.map((f: any) => (typeof f === 'string' ? f : f?.name)).filter(Boolean),
@@ -488,16 +453,14 @@ async function getCompetitors(req: NextRequest) {
             total: competitors.length,
             vehicle: vehicleData?.vehicle || null,
             warning: usedRelaxedFallback ? 'No matches for your exact filters. Showing closest matches from a broader national search.' : undefined,
-            _debug: competitors.length
-                ? undefined
-                : {
+            _debug: {
+                usedRelaxedFallback,
+                ...(competitors.length ? {} : {
                     competitorUrlUsed: Boolean(competitorUrl),
                     make: searchParams.get('make') || vehicleForFallback.make || null,
                     model: searchParams.get('model') || vehicleForFallback.model || null,
-                    year: searchParams.get('year') || vehicleForFallback.yearOfManufacture || vehicleForFallback.year || null,
-                    postcode: searchUrl.searchParams.get('postcode') || null,
-                    radius: searchUrl.searchParams.get('radius') || null,
-                },
+                }),
+            },
         });
 
     } catch (error: any) {

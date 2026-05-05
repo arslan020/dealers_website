@@ -39,11 +39,13 @@ async function handleDerivatives(req: NextRequest) {
     }
 
     // ── Derivative search ─────────────────────────────────────────────────────
-    const make = searchParams.get('make') || undefined;
-    const model = searchParams.get('model') || undefined;
-    const generation = searchParams.get('generation') || undefined;
-    const fuelType = searchParams.get('fuelType') || undefined;
-    const engineSize = searchParams.get('engineSize') || undefined;
+    const make         = searchParams.get('make')         || undefined;
+    const model        = searchParams.get('model')        || undefined;
+    const generation   = searchParams.get('generation')   || undefined;
+    const fuelType     = searchParams.get('fuelType')     || undefined;
+    const transmission = searchParams.get('transmission') || undefined;
+    const trim         = searchParams.get('trim')         || undefined;
+    const vehicleType  = searchParams.get('vehicleType')  || undefined;
     const generationId = searchParams.get('generationId') || undefined;
 
     if (!make && !model && !generationId) {
@@ -51,26 +53,16 @@ async function handleDerivatives(req: NextRequest) {
     }
 
     try {
-        // AT Taxonomy API: /taxonomy/derivatives (generationId preferred; text filters also accepted)
-        const data = await client.searchDerivatives({ make, model, generation, fuelType, engineSize, generationId });
+        const data = await client.searchDerivatives({ make, model, generation, fuelType, transmission, trim, vehicleType, generationId });
 
-        // Normalise AT response shapes to a consistent array
-        const raw = data?.derivatives || data?.derivative || data?.vehicles || data?.results || [];
+        // AT list response: { derivative: [{derivativeId, name}] } (no filters)
+        //                or { derivatives: [{derivativeId, name, introduced, discontinued}] } (with filters)
+        // Technical fields (fuelType, transmissionType, etc.) are only in GET /taxonomy/derivatives/{id}
+        const raw = data?.derivatives || data?.derivative || [];
         const derivatives = raw.map((d: any) => ({
-            id: d.derivativeId || d.id,
-            label: d.derivative || d.name || d.description || `${d.make} ${d.model} ${d.derivative}`,
-            make: d.make,
-            model: d.model,
-            generation: d.generation || d.generationName,
-            fuelType: d.fuelType,
-            engineSize: d.engineSize || d.engineSizeCC,
-            transmission: d.transmissionType || d.transmission,
-            bodyType: d.bodyType,
-            seats: d.seats,
-            doors: d.doors,
-            drivetrain: d.drivetrain || d.driveType,
-            colour: d.colour,
-            co2: d.co2EmissionGPKM,
+            id: d.derivativeId,
+            label: d.name || '',
+            generation: d.generationName || null,
             introduced: d.introduced || null,
             discontinued: d.discontinued || null,
         }));

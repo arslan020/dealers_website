@@ -72,6 +72,36 @@ async function lookupVehicle(req: NextRequest) {
 
         const engineSize = vehicleData.engine?.sizeCC || vehicleData.engineCapacity;
 
+        // Extract all technical spec fields from the AT /vehicles response.
+        // These are saved as technicalSpecs on the Vehicle document so SpecificationTab
+        // shows data immediately for new Draft vehicles (before they have a stockId).
+        const AT_SPEC_FIELDS = [
+            'topSpeedMPH', 'zeroToSixtyMPHSeconds', 'zeroToOneHundredKMPHSeconds',
+            'engineCapacityCC', 'badgeEngineSizeLitres', 'badgeEngineSizeCC',
+            'cylinders', 'cylinderArrangement', 'valves', 'boreMM', 'strokeMM',
+            'enginePowerBHP', 'enginePowerPS', 'engineTorqueNM', 'engineTorqueLBFT',
+            'fuelCapacityLitres', 'fuelDelivery', 'gears', 'startStop',
+            'batteryRangeMiles', 'batteryCapacityKWH', 'batteryUsableCapacityKWH',
+            'co2EmissionGPKM', 'emissionClass',
+            'fuelEconomyNEDCExtraUrbanMPG', 'fuelEconomyNEDCUrbanMPG', 'fuelEconomyNEDCCombinedMPG',
+            'fuelEconomyWLTPLowMPG', 'fuelEconomyWLTPMediumMPG', 'fuelEconomyWLTPHighMPG',
+            'fuelEconomyWLTPExtraHighMPG', 'fuelEconomyWLTPCombinedMPG',
+            'insuranceGroup', 'insuranceSecurityCode',
+            'lengthMM', 'heightMM', 'widthMM', 'wheelbaseMM',
+            'minimumKerbWeightKG', 'grossVehicleWeightKG',
+            'bootSpaceSeatsUpLitres', 'bootSpaceSeatsDownLitres',
+            'payloadLengthMM', 'payloadWidthMM', 'payloadHeightMM', 'payloadWeightKG',
+            'drivetrain', 'ulezCompliant', 'rde2', 'countryOfOrigin',
+            'sector', 'axles', 'unladenWeightKG', 'noseWeightKG', 'mtplmKG',
+            'batteryChargeTime', 'batteryQuickChargeTime', 'batteryHealth',
+        ];
+        const technicalSpecs: Record<string, any> = {};
+        for (const field of AT_SPEC_FIELDS) {
+            if (vehicleData[field] !== null && vehicleData[field] !== undefined) {
+                technicalSpecs[field] = vehicleData[field];
+            }
+        }
+
         const mappedData: Record<string, any> = {
             make: vehicleData.make,
             vehicleModel: vehicleData.model,
@@ -87,9 +117,10 @@ async function lookupVehicle(req: NextRequest) {
             colour: vehicleData.colour || vehicleData.color,
             doors: vehicleData.doors,
             seats: vehicleData.seats,
-            co2: vehicleData.co2EmissionGPKM || vehicleData.co2Emissions,
-            features: vehicleData.features || [],
-            competitors: responseData.competitors?.href || null,
+            co2EmissionGPKM: vehicleData.co2EmissionGPKM ?? vehicleData.co2Emissions ?? null,
+            wheelbaseMM: vehicleData.wheelbaseMM ?? null,
+            features: responseData.features || [],
+            competitors: responseData.links?.competitors?.href || null,
             derivativeId: vehicleData.derivativeId,
             generation: vehicleData.generation || vehicleData.generationName || '',
             trim: vehicleData.trim || vehicleData.trimLevel || '',
@@ -98,8 +129,10 @@ async function lookupVehicle(req: NextRequest) {
             wheelbase: vehicleData.wheelbase || vehicleData.wheelBase || '',
             registeredDate: vehicleData.registrationDate || vehicleData.firstRegistrationDate ||
                             vehicleData.dateOfFirstRegistration || '',
+            vin: vehicleData.vin || '',
             rawResponse: vehicleData,
             derivativeIdSource: vehicleData.derivativeId ? 'lookup' : undefined,
+            technicalSpecs,
         };
 
         // ── Taxonomy fallback: walk Make→Model→Generation→Derivative if no derivativeId ──
@@ -111,7 +144,8 @@ async function lookupVehicle(req: NextRequest) {
                     model: mappedData.vehicleModel,
                     generation: mappedData.generation || undefined,
                     fuelType: mappedData.fuelType || undefined,
-                    engineSize: engineSize ? String(engineSize) : undefined,
+                    transmission: mappedData.transmission || undefined,
+                    trim: mappedData.trim || undefined,
                 });
 
                 if (derivatives && derivatives.length > 0) {
@@ -136,7 +170,42 @@ async function lookupVehicle(req: NextRequest) {
             }
         }
 
-        return NextResponse.json({ ok: true, vehicle: mappedData });
+        // Process features into categorised lists so callers don't need a second AT request
+        const rawFeatures: any[] = mappedData.features || [];
+        const optionalExtras: any[] = [];
+        const standardFeatures: any[] = [];
+        const factoryFitted: string[] = [];
+
+        rawFeatures.forEach((f: any) => {
+            const name: string = f.name || '';
+            if (!name) return;
+            const isOptional = f.type === 'Optional';
+            const category: string = f.category || 'Other';
+            const genericName: string | null = f.genericName || null;
+            const factoryCodes: string[] = Array.isArray(f.factoryCodes) ? f.factoryCodes : [];
+            const basicPrice = typeof f.basicPrice === 'number' ? f.basicPrice : null;
+            const vatPrice = typeof f.vatPrice === 'number' ? f.vatPrice : null;
+            const totalPrice = basicPrice !== null && vatPrice !== null ? basicPrice + vatPrice : basicPrice;
+            const isFitted = f.factoryFitted === true;
+            if (isFitted) factoryFitted.push(name);
+            if (isOptional) {
+                optionalExtras.push({
+                    name, genericName, price: totalPrice, fitted: isFitted, category, factoryCodes,
+                    rarityRating: f.rarityRating || null, valueRating: f.valueRating || null,
+                    finish: f.finish || null, genericFinish: f.genericFinish || null,
+                });
+            } else {
+                standardFeatures.push({ name, genericName, category, factoryCodes });
+            }
+        });
+
+        return NextResponse.json({
+            ok: true,
+            vehicle: mappedData,
+            standardFeatures,
+            optionalExtras,
+            factoryFitted: [...new Set(factoryFitted)],
+        });
 
     } catch (error: any) {
         console.error('[VRM Lookup Error]', error.message);
