@@ -4,11 +4,12 @@ import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
 
 // Scores a candidate derivative against known vehicle signals.
-// Higher = better match. Used when the VRM lookup returns no derivativeId.
+// Higher = better match. Used when the VRM lookup returns no/wrong/incomplete derivativeId.
 function scoreDerivative(candidate: any, signals: {
     transmissionType?: string;
     derivativeName?: string;
     engineSize?: number;
+    year?: number;
 }): number {
     let score = 0;
     const name = (candidate.name || candidate.derivative || '').toLowerCase();
@@ -30,6 +31,24 @@ function scoreDerivative(candidate: any, signals: {
 
     if (signals.engineSize && candidate.engineCapacityCC) {
         if (Math.abs(candidate.engineCapacityCC - signals.engineSize) < 50) score += 3;
+    }
+
+    // Year-based generation matching — highest weight because a wrong generation
+    // produces a completely wrong derivativeId even if name/engine match.
+    if (signals.year) {
+        const yearFrom = candidate.yearFrom ?? candidate.generationYearFrom ?? null;
+        const yearTo   = candidate.yearTo   ?? candidate.generationYearTo   ?? null;
+        if (yearFrom && yearTo) {
+            if (signals.year >= yearFrom && signals.year <= yearTo) {
+                score += 10; // exact range match
+            } else {
+                const dist = Math.min(Math.abs(signals.year - yearFrom), Math.abs(signals.year - yearTo));
+                if (dist <= 1) score += 4;
+                else if (dist <= 2) score += 2;
+            }
+        } else if (yearFrom) {
+            if (signals.year >= yearFrom) score += 5;
+        }
     }
 
     return score;
@@ -135,10 +154,27 @@ async function lookupVehicle(req: NextRequest) {
             technicalSpecs,
         };
 
-        // ── Taxonomy fallback: walk Make→Model→Generation→Derivative if no derivativeId ──
-        if (!mappedData.derivativeId && mappedData.make && mappedData.vehicleModel) {
+        // ── Taxonomy fallback: walk Make→Model→Generation→Derivative ──────────────
+        // Triggers when:
+        //   1. No derivativeId from lookup (missing data)
+        //   2. derivativeId present but generation is missing (incomplete data —
+        //      the returned ID may belong to the wrong generation for this year)
+        //   3. derivativeId present but no year returned — can't verify it's correct
+        const vehicleYear = mappedData.year ? Number(mappedData.year) : undefined;
+        const lookupSeemsSuspect =
+            mappedData.derivativeId &&
+            (!mappedData.generation || !vehicleYear);
+
+        const needsTaxonomyFallback =
+            (!mappedData.derivativeId || lookupSeemsSuspect) &&
+            mappedData.make && mappedData.vehicleModel;
+
+        if (needsTaxonomyFallback) {
+            const reason = !mappedData.derivativeId ? 'no derivativeId'
+                : !mappedData.generation ? 'no generation returned'
+                : 'no year returned';
             try {
-                console.log(`[Taxonomy Fallback] No derivativeId from lookup for ${vrm} — walking taxonomy tree`);
+                console.log(`[Taxonomy Fallback] ${reason} for ${vrm} — walking taxonomy tree`);
                 const { derivatives } = await client.searchDerivatives({
                     make: mappedData.make,
                     model: mappedData.vehicleModel,
@@ -146,6 +182,7 @@ async function lookupVehicle(req: NextRequest) {
                     fuelType: mappedData.fuelType || undefined,
                     transmission: mappedData.transmission || undefined,
                     trim: mappedData.trim || undefined,
+                    year: vehicleYear,
                 });
 
                 if (derivatives && derivatives.length > 0) {
@@ -154,14 +191,20 @@ async function lookupVehicle(req: NextRequest) {
                             transmissionType: mappedData.transmission,
                             derivativeName: mappedData.derivative,
                             engineSize: engineSize ? Number(engineSize) : undefined,
+                            year: vehicleYear,
                         }) }))
                         .sort((a: any, b: any) => b.score - a.score);
 
                     const best = scored[0].d;
-                    mappedData.derivativeId = best.derivativeId;
-                    mappedData.derivativeIdSource = 'taxonomy';
-                    if (!mappedData.generation && best.generationName) mappedData.generation = best.generationName;
-                    console.log(`[Taxonomy Fallback] Resolved derivativeId: ${best.derivativeId} (score: ${scored[0].score})`);
+                    // Only override existing derivativeId if the taxonomy match scores
+                    // confidently (score ≥ 8 means at least year range + one other signal matched).
+                    const shouldOverride = !mappedData.derivativeId || scored[0].score >= 8;
+                    if (shouldOverride) {
+                        mappedData.derivativeId = best.derivativeId;
+                        mappedData.derivativeIdSource = 'taxonomy';
+                        if (best.generationName) mappedData.generation = best.generationName;
+                    }
+                    console.log(`[Taxonomy Fallback] derivativeId: ${best.derivativeId}, score: ${scored[0].score}, override: ${shouldOverride}`);
                 } else {
                     console.warn(`[Taxonomy Fallback] No derivatives found for ${mappedData.make} ${mappedData.vehicleModel}`);
                 }

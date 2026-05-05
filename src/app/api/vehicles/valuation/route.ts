@@ -18,6 +18,7 @@ async function getVehicleValuation(req: NextRequest) {
         registeredDate,       // alias sent by quick-check page
         conditionRating: cr,
         condition,            // alias sent by quick-check page
+        optionalExtras,       // factory-fitted AT optional extras (names[]) from lookup
     } = body;
 
     const firstRegistrationDate = frd || registeredDate;
@@ -51,9 +52,17 @@ async function getVehicleValuation(req: NextRequest) {
                 vehicle: { derivativeId, firstRegistrationDate, odometerReadingMiles },
             };
             if (conditionRating) payload.conditionRating = conditionRating;
-            // features: pass array of { name } objects; empty array = base valuation; omitted = market value
+            // Merge user-selected features + AT factory-fitted optional extras (deduped).
+            // AT uses these to calculate an adjusted valuation — more features = higher value.
+            const featureNames = new Set<string>();
             if (Array.isArray(features)) {
-                payload.features = features.map((f: any) => ({ name: typeof f === 'string' ? f : f.name }));
+                features.forEach((f: any) => { const n = typeof f === 'string' ? f : f.name; if (n) featureNames.add(n); });
+            }
+            if (Array.isArray(optionalExtras)) {
+                optionalExtras.forEach((f: any) => { const n = typeof f === 'string' ? f : f.name; if (n) featureNames.add(n); });
+            }
+            if (featureNames.size > 0) {
+                payload.features = [...featureNames].map(name => ({ name }));
             }
             // price: triggers priceIndicatorRating in retail response
             if (price != null) {

@@ -38,30 +38,34 @@ async function getCompetitors(req: NextRequest) {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        // Step 1: Get vehicle data with competitors=true to receive the competitor search URL
+        // Step 1: Get vehicle data with features+competitors in one request — only if make/model
+        // not already supplied by the caller (they usually are, from the vehicle detail page).
         let vehicleData: any = null;
         let competitorUrl: string | undefined;
 
-        try {
-            vehicleData = await client.get('/vehicles', {
-                registration: vrm,
-                advertiserId: client.dealerId || '',
-                features: 'true',
-                competitors: 'true',
-            });
+        const hasMakeModel = !!(searchParams.get('make') && searchParams.get('model'));
 
-            // The competitor URL can be at different paths depending on AT response shape
-            competitorUrl =
-                vehicleData?.links?.competitors?.href
-                ?? vehicleData?.vehicle?.links?.competitors?.href
-                ?? vehicleData?.vehicle?.competitorUrl
-                ?? vehicleData?.vehicle?.competitors?.searchUrl
-                ?? vehicleData?.competitors?.searchUrl
-                ?? vehicleData?.competitorUrl
-                ?? undefined;
+        if (!hasMakeModel) {
+            try {
+                vehicleData = await client.get('/vehicles', {
+                    registration: vrm,
+                    advertiserId: client.dealerId || '',
+                    features: 'true',
+                    competitors: 'true',
+                });
 
-        } catch (e: any) {
-            console.error('[Competitors] VRM lookup failed:', e.message);
+                competitorUrl =
+                    vehicleData?.links?.competitors?.href
+                    ?? vehicleData?.vehicle?.links?.competitors?.href
+                    ?? vehicleData?.vehicle?.competitorUrl
+                    ?? vehicleData?.vehicle?.competitors?.searchUrl
+                    ?? vehicleData?.competitors?.searchUrl
+                    ?? vehicleData?.competitorUrl
+                    ?? undefined;
+
+            } catch (e: any) {
+                console.error('[Competitors] VRM lookup failed:', e.message);
+            }
         }
 
         // Step 2: Build search URL

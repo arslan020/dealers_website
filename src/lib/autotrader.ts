@@ -239,6 +239,7 @@ export class AutoTraderClient {
     async searchDerivatives(params: {
         make?: string; model?: string; generation?: string; vehicleType?: string;
         fuelType?: string; transmission?: string; trim?: string; generationId?: string;
+        year?: number;
     }) {
         if (!this.dealerId) await this.init();
         const vehicleType = params.vehicleType || 'Car';
@@ -257,7 +258,7 @@ export class AutoTraderClient {
         }
 
         // ── Taxonomy chain: make → makeId → modelId → generationIds → derivatives ──
-        // Step 1: Find makeId — pass make filter directly to AT (handles misspellings)
+        // Step 1: Find makeId
         const makesData = await this.get('/taxonomy/makes', {
             advertiserId: this.dealerId!,
             vehicleType,
@@ -269,7 +270,7 @@ export class AutoTraderClient {
             : makes[0];
         if (!makeMatch?.makeId) return { derivatives: [] };
 
-        // Step 2: Find modelId — pass model filter directly to AT
+        // Step 2: Find modelId
         const modelsData = await this.get('/taxonomy/models', {
             advertiserId: this.dealerId!,
             vehicleType,
@@ -291,15 +292,29 @@ export class AutoTraderClient {
         const generations: any[] = gensData?.generations || [];
         if (generations.length === 0) return { derivatives: [] };
 
-        // Filter by generation text if provided
+        // Step 3a: Filter/sort generations by year when available.
+        // A wrong generation produces a completely wrong derivativeId, so this is
+        // the most important signal when multiple generations exist for a model.
+        let candidateGens = generations;
+        if (params.year) {
+            const yr = params.year;
+            const inRange = generations.filter((g: any) => {
+                const from = g.yearFrom ?? g.startYear ?? null;
+                const to   = g.yearTo   ?? g.endYear   ?? null;
+                if (from && to)  return yr >= from && yr <= to;
+                if (from)        return yr >= from;
+                return true;
+            });
+            if (inRange.length > 0) candidateGens = inRange;
+        }
+
+        // If generation name filter provided, narrow further
         const filteredGens = params.generation
-            ? generations.filter((g: any) => g.name?.toLowerCase().includes(params.generation!.toLowerCase()))
-            : generations;
-        // Limit to most recent 5 generations to avoid too many parallel calls
-        const targetGens = (filteredGens.length > 0 ? filteredGens : generations).slice(0, 5);
+            ? candidateGens.filter((g: any) => g.name?.toLowerCase().includes(params.generation!.toLowerCase()))
+            : candidateGens;
+        const targetGens = (filteredGens.length > 0 ? filteredGens : candidateGens).slice(0, 5);
 
         // Step 4: Fetch derivatives for all target generations in parallel
-        // AT valid filter params: fuelType, transmission, trim, vehicleType (not engineSize)
         const derivativeArrays = await Promise.all(
             targetGens.map(async (gen: any) => {
                 const q: Record<string, string> = {
@@ -314,8 +329,10 @@ export class AutoTraderClient {
                     const d = await this.get('/taxonomy/derivatives', q);
                     return (d?.derivatives || d?.derivative || []).map((deriv: any) => ({
                         ...deriv,
-                        generationId: gen.generationId,
-                        generationName: gen.name,
+                        generationId:    gen.generationId,
+                        generationName:  gen.name,
+                        yearFrom:        gen.yearFrom ?? gen.startYear ?? null,
+                        yearTo:          gen.yearTo   ?? gen.endYear   ?? null,
                     }));
                 } catch {
                     return [];

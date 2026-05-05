@@ -5052,65 +5052,68 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         setVehicle(prev => prev ? { ...prev, status: newStatus } : null);
     };
 
-    const handleChannelToggle = (chanKey: string, _chanLabel: string) => {
-        if (!vehicle) return;
-        const current = vehicle[chanKey as keyof VehicleDetail] as string;
-        const next = current === 'PUBLISHED' ? 'NOT_PUBLISHED' : 'PUBLISHED';
-        // Only update local state — user must click Save to persist
-        setVehicle(prev => prev ? { ...prev, [chanKey]: next } : null);
+    const [savingChannel, setSavingChannel] = useState<string | null>(null);
+
+    // chanKey → AT channel name mapping
+    const CHAN_KEY_TO_AT: Record<string, string> = {
+        atAdvertStatus:         'autotrader',
+        advertiserAdvertStatus: 'advertiser',
+        locatorAdvertStatus:    'locator',
+        exportAdvertStatus:     'export',
+        profileAdvertStatus:    'profile',
     };
 
-    const handleSaveChannels = async () => {
-        if (!vehicle?.stockId) {
+    // Instantly toggle a single channel on AT and persist. Includes advert text so
+    // description/attention grabber stay in sync each time a channel is toggled.
+    const toggleAndSave = async (chanKey: string) => {
+        if (!vehicle) return;
+        if (!vehicle.stockId) {
             alert('No AutoTrader stock ID — create the stock record on AutoTrader first.');
             return;
         }
-        setSaving(true);
+        if (savingChannel) return; // prevent concurrent saves
+
+        const channelName = CHAN_KEY_TO_AT[chanKey];
+        if (!channelName) return;
+
+        const current = vehicle[chanKey as keyof VehicleDetail] as string;
+        const next = current === 'PUBLISHED' ? 'NOT_PUBLISHED' : 'PUBLISHED';
+
+        // Optimistic update
+        setVehicle(prev => prev ? { ...prev, [chanKey]: next } : null);
+        setSavingChannel(chanKey);
         try {
-            // Send all 5 channels to AT in a single PATCH
             const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    channels: {
-                        autotrader: vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
-                        advertiser: vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
-                        locator:    vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
-                        export:     vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
-                        profile:    vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
-                    },
+                    channels: { [channelName]: next },
+                    attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
+                    description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
                 }),
             });
             const data = await res.json();
-            if (!data.ok) throw new Error(data.error || 'Failed to update AT advertising');
+            if (!data.ok) throw new Error(data.error || 'Failed to update channel');
 
-            // Update local state with actual AT-returned statuses (may be CAPPED/REJECTED)
             const actual = data.actualStatuses || {};
-            const localUpdates: Record<string, string> = {
-                atAdvertStatus:         actual.atAdvertStatus         || vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
-                advertiserAdvertStatus: actual.advertiserAdvertStatus || vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
-                locatorAdvertStatus:    actual.locatorAdvertStatus    || vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
-                exportAdvertStatus:     actual.exportAdvertStatus     || vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
-                profileAdvertStatus:    actual.profileAdvertStatus    || vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
+            const localUpdates: Partial<VehicleDetail> = {
+                [chanKey]: actual[chanKey] || next,
             };
-
-            // Reflect actual statuses in UI immediately
             setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
-
-            // Save actual statuses to local DB
             await patchVehicle(localUpdates);
 
-            // Warn about CAPPED or REJECTED channels
             if (data.warnings?.length > 0) {
                 const msgs = data.warnings.map((w: any) =>
                     `${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`
                 ).join('\n');
-                alert(`Some channels could not be published:\n\n${msgs}`);
+                alert(`Channel update warning:\n\n${msgs}`);
             }
         } catch (err: any) {
-            alert(err.message || 'Failed to update advertising channels');
+            // Revert optimistic update on failure
+            setVehicle(prev => prev ? { ...prev, [chanKey]: current } : null);
+            alert(err.message || 'Failed to update channel');
         } finally {
-            setSaving(false);
+            setSavingChannel(null);
         }
     };
 
@@ -6559,8 +6562,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                         {/* Big publish toggle */}
                                         <button
-                                            onClick={() => handleChannelToggle('atAdvertStatus', 'AutoTrader')}
-                                            className={`relative w-14 h-7 rounded-full transition-all duration-300 shadow-inner focus:outline-none ${
+                                            onClick={() => toggleAndSave('atAdvertStatus')}
+                                            disabled={savingChannel === 'atAdvertStatus'}
+                                            className={`relative w-14 h-7 rounded-full transition-all duration-300 shadow-inner focus:outline-none disabled:opacity-60 ${
                                                 vehicle.atAdvertStatus === 'PUBLISHED' ? 'bg-emerald-500' : 'bg-slate-200'
                                             }`}
                                             title={vehicle.atAdvertStatus === 'PUBLISHED' ? 'Click to unpublish from AutoTrader' : 'Click to publish to AutoTrader'}
@@ -6665,16 +6669,39 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                         {vehicle.stockId ? (
                                             <button
-                                                onClick={handleSaveChannels}
+                                                onClick={async () => {
+                                                    if (!vehicle.stockId) return;
+                                                    setSaving(true);
+                                                    try {
+                                                        // Push latest advert text to AT without changing channel statuses
+                                                        const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
+                                                            method: 'PATCH',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                                channels: {
+                                                                    autotrader: vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
+                                                                    advertiser: vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
+                                                                    locator:    vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
+                                                                    export:     vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
+                                                                    profile:    vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
+                                                                },
+                                                                attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
+                                                                description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
+                                                            }),
+                                                        });
+                                                        const d = await res.json();
+                                                        if (!d.ok) throw new Error(d.error || 'Failed');
+                                                    } catch (err: any) {
+                                                        alert(err.message || 'Failed to update advert text');
+                                                    } finally {
+                                                        setSaving(false);
+                                                    }
+                                                }}
                                                 disabled={saving}
-                                                className={`flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold transition-all shadow-sm ${
-                                                    vehicle.atAdvertStatus === 'PUBLISHED'
-                                                        ? 'bg-slate-800 text-white hover:bg-slate-900'
-                                                        : 'bg-[#4D7CFF] text-white hover:bg-blue-600'
-                                                }`}
+                                                className="flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold bg-slate-700 text-white hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50"
                                             >
                                                 {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                                {vehicle.atAdvertStatus === 'PUBLISHED' ? 'Save & Unpublish' : 'Save & Publish'}
+                                                Update Advert Text
                                             </button>
                                         ) : (
                                             <button
@@ -6719,8 +6746,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                             </span>
                                                         )}
                                                         <button
-                                                            onClick={() => handleChannelToggle(chan.key, chan.label)}
-                                                            className={`relative w-11 h-6 rounded-full transition-all duration-300 ${isLive ? 'bg-[#4D7CFF]' : 'bg-slate-200'}`}
+                                                            onClick={() => toggleAndSave(chan.key)}
+                                                            disabled={savingChannel === chan.key}
+                                                            className={`relative w-11 h-6 rounded-full transition-all duration-300 disabled:opacity-60 ${isLive ? 'bg-[#4D7CFF]' : 'bg-slate-200'}`}
                                                         >
                                                             <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-300 ${isLive ? 'left-6' : 'left-1'}`} />
                                                         </button>
@@ -7185,7 +7213,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 setSpValuationLoading(true);
                                 setSpValuationError('');
                                 try {
-                                    const res = await fetch('/api/vehicles/valuation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ vrm: vehicle.vrm, mileage: vehicle.mileage, condition: vehicle.condition || 'Good', derivativeId: (vehicle as any).derivativeId, registeredDate: (vehicle as any).dateOfRegistration, features: vehicle.features }) });
+                                    const res = await fetch('/api/vehicles/valuation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ vrm: vehicle.vrm, mileage: vehicle.mileage, condition: vehicle.condition || 'Good', derivativeId: (vehicle as any).derivativeId, registeredDate: (vehicle as any).dateOfRegistration, features: vehicle.features, optionalExtras: atOptions.filter(o => o.fitted).map(o => o.name) }) });
                                     const d = await res.json();
                                     if (d.ok) {
                                         setSpValuation(d);

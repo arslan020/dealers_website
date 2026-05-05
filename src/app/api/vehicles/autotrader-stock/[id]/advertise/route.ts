@@ -47,7 +47,7 @@ async function updateAdvertisingStatus(req: NextRequest, { params }: { params: P
 
     const { id: stockId } = await params;
     const body = await req.json();
-    const { channels } = body;
+    const { channels, attentionGrabber, description } = body;
 
     if (!channels || typeof channels !== 'object' || Object.keys(channels).length === 0) {
         return NextResponse.json({ ok: false, error: 'channels object is required' }, { status: 400 });
@@ -67,11 +67,13 @@ async function updateAdvertisingStatus(req: NextRequest, { params }: { params: P
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        // Build single retailAdverts patch with all requested channels
-        const retailAdverts: Record<string, { status: string }> = {};
+        // Build retailAdverts patch — channel statuses + advert text in one PATCH
+        const retailAdverts: Record<string, any> = {};
         for (const [ch, status] of Object.entries(channels)) {
             retailAdverts[CHANNEL_KEY_MAP[ch]] = { status: status as string };
         }
+        if (attentionGrabber) retailAdverts.attentionGrabber = String(attentionGrabber).slice(0, 30);
+        if (description)      retailAdverts.description      = String(description).slice(0, 4000);
 
         const result = await client.patch(
             `/stock/${stockId}`,

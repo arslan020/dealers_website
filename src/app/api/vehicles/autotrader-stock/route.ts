@@ -209,14 +209,22 @@ export async function POST(req: NextRequest) {
         if (suppliedPrice < 75) {
             return NextResponse.json({ ok: false, error: { message: 'Price must be at least £75 to advertise on AutoTrader.', code: 'VALIDATION_ERROR' } }, { status: 400 });
         }
+        // forecourtPrice = total display price (may include admin fee). Must always be sent.
+        // If not explicitly set, default to suppliedPrice.
+        const forecourtPrice = Number(vehicle.forecourtPrice) || suppliedPrice;
 
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
         // ─── Map local vehicle to AT schema ──────────────────────────────
-        // AT docs: use all available data. Typed model field wins; manualSpecs fills gaps.
+        // Priority: explicit model field → technicalSpecs (from AT lookup) → manualSpecs
         const ms = vehicle.manualSpecs || {};
-        const sp = (val: any, key: string) => (val !== undefined && val !== null) ? val : ms[key];
+        const ts = vehicle.technicalSpecs || {};
+        const sp = (val: any, key: string) => {
+            if (val !== undefined && val !== null) return val;
+            if (ts[key] !== undefined && ts[key] !== null) return ts[key];
+            return ms[key];
+        };
 
         const vrm = (vehicle.vrm || vehicle.registration || '').toString().toUpperCase().replace(/\s/g, '');
         const engineCC = vehicle.engineSize ? parseInt(String(vehicle.engineSize).replace(/\D/g, ''), 10) || undefined : undefined;
@@ -314,15 +322,22 @@ export async function POST(req: NextRequest) {
                 ...(vehicle.year               && { yearOfManufacture: String(vehicle.year) }),
                 ...(vehicle.dateOfRegistration && { firstRegistrationDate: vehicle.dateOfRegistration }),
                 ...(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible') != null && { wheelchairAccessible: Boolean(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible')) }),
-                // Engine — model field wins; manualSpecs fills gaps
+                // Engine — model field wins; technicalSpecs (AT lookup) fills gaps; manualSpecs last resort
                 ...(engineCC                                                         && { engineCapacityCC: engineCC }),
                 ...(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres') != null && { badgeEngineSizeLitres: Number(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres')) }),
                 ...(sp(vehicle.enginePowerBHP,  'enginePowerBHP')  != null && { enginePowerBHP:  Number(sp(vehicle.enginePowerBHP,  'enginePowerBHP')) }),
                 ...(sp(vehicle.enginePowerPS,   'enginePowerPS')   != null && { enginePowerPS:   Number(sp(vehicle.enginePowerPS,   'enginePowerPS')) }),
                 ...(sp(vehicle.engineTorqueNM,  'engineTorqueNM')  != null && { engineTorqueNM:  Number(sp(vehicle.engineTorqueNM,  'engineTorqueNM')) }),
+                ...(sp(vehicle.engineTorqueLBFT,'engineTorqueLBFT')!= null && { engineTorqueLBFT:Number(sp(vehicle.engineTorqueLBFT,'engineTorqueLBFT')) }),
                 ...(sp(vehicle.cylinders,       'cylinders')       != null && { cylinders:       Number(sp(vehicle.cylinders,       'cylinders')) }),
+                ...(sp(vehicle.cylinderArrangement,'cylinderArrangement') && { cylinderArrangement: sp(vehicle.cylinderArrangement,'cylinderArrangement') }),
                 ...(sp(vehicle.valves,          'valves')          != null && { valves:          Number(sp(vehicle.valves,          'valves')) }),
+                ...(sp(vehicle.boreMM,          'boreMM')          != null && { boreMM:          Number(sp(vehicle.boreMM,          'boreMM')) }),
+                ...(sp(vehicle.strokeMM,        'strokeMM')        != null && { strokeMM:        Number(sp(vehicle.strokeMM,        'strokeMM')) }),
                 ...(sp(vehicle.fuelCapacityLitres, 'fuelCapacityLitres') != null && { fuelCapacityLitres: Number(sp(vehicle.fuelCapacityLitres, 'fuelCapacityLitres')) }),
+                ...(sp(vehicle.fuelDelivery,    'fuelDelivery')    && { fuelDelivery:    sp(vehicle.fuelDelivery,    'fuelDelivery') }),
+                ...(sp(vehicle.gears,           'gears')           != null && { gears:           Number(sp(vehicle.gears,           'gears')) }),
+                ...(sp(vehicle.startStop,       'startStop')       != null && { startStop:       Boolean(sp(vehicle.startStop,      'startStop')) }),
                 // Performance
                 ...(sp(vehicle.topSpeedMPH,               'topSpeedMPH')               != null && { topSpeedMPH:               Number(sp(vehicle.topSpeedMPH,               'topSpeedMPH')) }),
                 ...(sp(vehicle.zeroToSixtyMPHSeconds,      'zeroToSixtyMPHSeconds')      != null && { zeroToSixtyMPHSeconds:      Number(sp(vehicle.zeroToSixtyMPHSeconds,      'zeroToSixtyMPHSeconds')) }),
@@ -361,6 +376,19 @@ export async function POST(req: NextRequest) {
                 // Boot space
                 ...(sp(vehicle.bootSpaceSeatsUpLitres,   'bootSpaceSeatsUpLitres')   != null && { bootSpaceSeatsUpLitres:   Number(sp(vehicle.bootSpaceSeatsUpLitres,   'bootSpaceSeatsUpLitres')) }),
                 ...(sp(vehicle.bootSpaceSeatsDownLitres, 'bootSpaceSeatsDownLitres') != null && { bootSpaceSeatsDownLitres: Number(sp(vehicle.bootSpaceSeatsDownLitres, 'bootSpaceSeatsDownLitres')) }),
+                // Van/HGV specifics
+                ...(sp(vehicle.axles,          'axles')          != null && { axles:          Number(sp(vehicle.axles,          'axles')) }),
+                ...(sp(vehicle.unladenWeightKG,'unladenWeightKG')!= null && { unladenWeightKG:Number(sp(vehicle.unladenWeightKG,'unladenWeightKG')) }),
+                ...(sp(vehicle.noseWeightKG,   'noseWeightKG')   != null && { noseWeightKG:   Number(sp(vehicle.noseWeightKG,   'noseWeightKG')) }),
+                ...(sp(vehicle.mtplmKG,        'mtplmKG')        != null && { mtplmKG:        Number(sp(vehicle.mtplmKG,        'mtplmKG')) }),
+                // EV charging
+                ...(sp(vehicle.batteryChargeTime,      'batteryChargeTime')      && { batteryChargeTime:      sp(vehicle.batteryChargeTime,      'batteryChargeTime') }),
+                ...(sp(vehicle.batteryQuickChargeTime, 'batteryQuickChargeTime') && { batteryQuickChargeTime: sp(vehicle.batteryQuickChargeTime, 'batteryQuickChargeTime') }),
+                ...(sp(vehicle.batteryHealth,          'batteryHealth')          != null && { batteryHealth: Number(sp(vehicle.batteryHealth, 'batteryHealth')) }),
+                // Compliance
+                ...(sp(vehicle.ulezCompliant, 'ulezCompliant') != null && { ulezCompliant: Boolean(sp(vehicle.ulezCompliant, 'ulezCompliant')) }),
+                ...(sp(vehicle.rde2,          'rde2')          != null && { rde2:          Boolean(sp(vehicle.rde2,          'rde2')) }),
+                ...(sp(vehicle.countryOfOrigin,'countryOfOrigin') && { countryOfOrigin: sp(vehicle.countryOfOrigin,'countryOfOrigin') }),
                 // Owners & history
                 ...(vehicle.previousOwners     != null && { owners: Number(vehicle.previousOwners) }),
                 ...(vehicle.engineNumber       && { engineNumber: vehicle.engineNumber }),
@@ -381,8 +409,8 @@ export async function POST(req: NextRequest) {
                 ...(vehicle.origin === 'UK Vehicle' && { origin: 'UK' }),
             },
             adverts: {
-                // forecourtPrice is at adverts level (NOT inside retailAdverts)
-                ...(vehicle.forecourtPrice != null && { forecourtPrice: { amountGBP: Number(vehicle.forecourtPrice) } }),
+                // forecourtPrice is at adverts level (NOT inside retailAdverts). Always required.
+                forecourtPrice: { amountGBP: forecourtPrice },
                 ...(retailVatStatus && { forecourtPriceVatStatus: retailVatStatus }),
                 ...(vatScheme       && { vatScheme }),
                 ...(vehicle.dueInDate              && { dueDate: vehicle.dueInDate }),
