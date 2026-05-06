@@ -320,7 +320,8 @@ export async function POST(req: NextRequest) {
                 ...(vehicle.seats              != null && { seats: Number(vehicle.seats) }),
                 ...(vehicle.mileage            != null && { odometerReadingMiles: Number(vehicle.mileage) }),
                 ...(vehicle.year               && { yearOfManufacture: String(vehicle.year) }),
-                ...(vehicle.dateOfRegistration && { firstRegistrationDate: vehicle.dateOfRegistration }),
+                // AT requires full YYYY-MM-DD — skip if only a year or invalid format is stored
+                ...(vehicle.dateOfRegistration && /^\d{4}-\d{2}-\d{2}/.test(String(vehicle.dateOfRegistration)) && { firstRegistrationDate: vehicle.dateOfRegistration }),
                 ...(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible') != null && { wheelchairAccessible: Boolean(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible')) }),
                 // Engine — model field wins; technicalSpecs (AT lookup) fills gaps; manualSpecs last resort
                 ...(engineCC                                                         && { engineCapacityCC: engineCC }),
@@ -455,9 +456,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, stockId, result });
     } catch (error: any) {
         console.error('[AutoTrader Stock Create] Error:', error.message);
+        if (error.data) {
+            console.error('[AutoTrader Stock Create] AT Response:', JSON.stringify(error.data, null, 2));
+        }
+        const atMessage = error.data?.message || error.data?.errors?.[0]?.message || error.data?.error || error.message || 'Failed to create stock on AutoTrader.';
         return NextResponse.json({ 
             ok: false, 
-            error: { message: error.message || 'Failed to create stock on AutoTrader.' } 
+            error: { message: atMessage } 
         }, { status: 500 });
     }
 }

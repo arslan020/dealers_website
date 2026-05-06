@@ -4,6 +4,7 @@ import Vehicle from '@/models/Vehicle';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
 import mongoose from 'mongoose';
+import { pickSilentSalesmanDescriptionFromVehicle, advertDescriptionToPlainText } from '@/lib/silent-salesman/vehicle-fields';
 
 import AutoTraderStockCache from '@/models/AutoTraderStockCache';
 
@@ -222,12 +223,43 @@ const AT_ORIGIN_MAP: Record<string, string> = {
 };
 
 function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = false) {
-    const featuresPayload = Array.isArray(vehicle.features) && vehicle.features.length > 0
-        ? vehicle.features.map((f: any) => (typeof f === 'string' ? { name: f } : f))
+    // Combine standard features + custom (dealer-selected / factory-fitted optional) features
+    const allFeatureNames = [
+        ...(Array.isArray(vehicle.features) ? vehicle.features : []),
+        ...(Array.isArray(vehicle.customFeatures) ? vehicle.customFeatures : []),
+    ];
+    const featuresPayload = allFeatureNames.length > 0
+        ? allFeatureNames.map((f: any) => (typeof f === 'string' ? { name: f } : f))
         : undefined;
 
     // engineSize stored as CC string from lookup (e.g. "1998"). Treat values >100 as CC, <=100 as litres.
     const engineSizeNum = vehicle.engineSize ? Number(vehicle.engineSize) : undefined;
+
+    // suppliedPrice from vehicle.price; forecourtPrice always sent — falls back to suppliedPrice
+    const suppliedPrice = Number(vehicle.price) || 0;
+    const forecourtPrice = Number(vehicle.forecourtPrice) || suppliedPrice;
+
+    // emissionClass: use direct field first, then fall back to technicalSpecs (populated by AT lookup)
+    const emissionClass = vehicle.emissionClass || vehicle.technicalSpecs?.emissionClass;
+
+    // attentionGrabber: use stored value, fall back to longAttentionGrabber (truncated to 30 chars)
+    const rawGrabber = (vehicle.attentionGrabber || '').trim()
+        || (vehicle.longAttentionGrabber || '').trim().slice(0, 30);
+    const advertAttentionGrabber = rawGrabber.slice(0, 30) || undefined;
+
+    // description: use dealer-written text first, then auto-generate from vehicle specs as fallback
+    const rawDescription = advertDescriptionToPlainText(
+        vehicle.description ||
+        vehicle.description2 ||
+        pickSilentSalesmanDescriptionFromVehicle(vehicle)
+    ).trim();
+    const advertDescription = rawDescription.slice(0, 4000) || undefined;
+
+    // description2: only send if it differs from description
+    const rawDescription2 = advertDescriptionToPlainText(vehicle.description2 || '').trim();
+    const advertDescription2 = (rawDescription2 && rawDescription2 !== rawDescription)
+        ? rawDescription2.slice(0, 4000)
+        : undefined;
 
     return {
         vehicle: {
@@ -238,6 +270,7 @@ function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = f
             ...(vehicle.vin                && { vin: vehicle.vin }),
             ...(vehicle.engineNumber       && { engineNumber: vehicle.engineNumber }),
             ...(vehicle.derivativeId       && { derivativeId: vehicle.derivativeId }),
+            ...(vehicle.derivative         && { derivative: vehicle.derivative }),
             ...(vehicle.mileage !== undefined && { odometerReadingMiles: Number(vehicle.mileage) }),
             ...(vehicle.colour             && { colour: vehicle.colour }),
             ...(vehicle.fuelType           && { fuelType: vehicle.fuelType }),
@@ -250,14 +283,15 @@ function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = f
             ...(vehicle.seats              && { seats: Number(vehicle.seats) }),
             ...(vehicle.drivetrain         && { drivetrain: vehicle.drivetrain }),
             ...(vehicle.driverPosition     && { steeringPosition: vehicle.driverPosition }),
-            ...(vehicle.dateOfRegistration && { dateOfRegistration: vehicle.dateOfRegistration }),
+            // AT requires full YYYY-MM-DD — skip if only a year or invalid format is stored
+            ...(vehicle.dateOfRegistration && /^\d{4}-\d{2}-\d{2}/.test(String(vehicle.dateOfRegistration)) && { firstRegistrationDate: vehicle.dateOfRegistration }),
             ...(vehicle.plate              && { plate: String(vehicle.plate) }),
             ...(vehicle.serviceHistory     && { serviceHistory: vehicle.serviceHistory }),
             ...(vehicle.previousOwners !== undefined && { previousOwners: Number(vehicle.previousOwners) }),
             ...(vehicle.motExpiry          && { motExpiryDate: vehicle.motExpiry }),
             ...(vehicle.manufacturerWarrantyMonths !== undefined && { warrantyMonthsOnPurchase: Number(vehicle.manufacturerWarrantyMonths) }),
             ...(vehicle.exteriorFinish     && { exteriorFinish: vehicle.exteriorFinish }),
-            ...(vehicle.emissionClass      && { emissionClass: vehicle.emissionClass }),
+            ...(emissionClass              && { emissionClass }),
             ...(vehicle.co2EmissionGPKM !== undefined && { co2EmissionGPKM: Number(vehicle.co2EmissionGPKM) }),
             ...(vehicle.numberOfKeys !== undefined && { keys: Number(vehicle.numberOfKeys) }),
             ...(vehicle.v5Present !== undefined && { v5Certificate: vehicle.v5Present }),
@@ -274,19 +308,19 @@ function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = f
                 : {}),
         },
         adverts: {
-            // forecourtPrice is at adverts level (NOT inside retailAdverts) per AT docs
-            ...(vehicle.forecourtPrice && { forecourtPrice: { amountGBP: Number(vehicle.forecourtPrice) } }),
+            // forecourtPrice is at adverts level (NOT inside retailAdverts) per AT docs — always required
+            forecourtPrice: { amountGBP: forecourtPrice },
             ...(vehicle.dueInDate      && { dueDate: vehicle.dueInDate }),
             ...(vehicle.dateInStock    && { stockInDate: vehicle.dateInStock }),
             ...(vehicle.includes12MonthsMot !== undefined && { twelveMonthsMot: vehicle.includes12MonthsMot }),
             ...(vehicle.includesMotInsurance !== undefined && { motInsurance: vehicle.includesMotInsurance }),
             ...(vehicle.vatStatus && { vatScheme: vehicle.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal' }),
             retailAdverts: {
-                suppliedPrice: { amountGBP: Number(vehicle.price) || 0 },
+                suppliedPrice: { amountGBP: suppliedPrice },
                 ...(vehicle.priceOnApplication !== undefined && { priceOnApplication: vehicle.priceOnApplication }),
-                ...(vehicle.description      && { description: vehicle.description }),
-                ...(vehicle.description2     && { description2: vehicle.description2 }),
-                ...(vehicle.attentionGrabber && { attentionGrabber: vehicle.attentionGrabber }),
+                ...(advertAttentionGrabber && { attentionGrabber: advertAttentionGrabber }),
+                ...(advertDescription      && { description: advertDescription }),
+                ...(advertDescription2     && { description2: advertDescription2 }),
                 ...(isDraft && {
                     autotraderAdvert:  { status: 'NOT_PUBLISHED' },
                     advertiserAdvert:  { status: 'NOT_PUBLISHED' },

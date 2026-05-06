@@ -183,6 +183,14 @@ export default function QuickCheckPage() {
             const previousOwners = checkData?.history?.previousOwners ?? checkData?.check?.previousOwners ?? undefined;
             const vin = checkData?.vin || vehicle.vin || undefined;
 
+            // Standard features (all) + factory-fitted optional features go into `features`
+            const factoryFittedNames = optExtras.filter(o => o.fitted).map(o => o.name);
+            const standardFeatureNames = stdFeatures.map(f => f.name);
+            const allStandardFeatures = [...new Set([...standardFeatureNames, ...factoryFittedNames])];
+
+            // Dealer-selected optional extras (not factory-fitted) go into `customFeatures`
+            const dealerSelectedExtras = [...selectedExtras];
+
             const body = {
                 make: vehicle.make,
                 model: vehicle.vehicleModel,
@@ -204,6 +212,11 @@ export default function QuickCheckPage() {
                 trim: vehicle.trim,
                 previousOwners,
                 motExpiry: motExpiry ?? undefined,
+                // Save features from lookup so AT stock push has complete data
+                features: allStandardFeatures.length > 0 ? allStandardFeatures : undefined,
+                customFeatures: dealerSelectedExtras.length > 0 ? dealerSelectedExtras : undefined,
+                // Save emissionClass as a direct field (also lives in technicalSpecs as fallback)
+                emissionClass: (vehicle.technicalSpecs as any)?.emissionClass || undefined,
                 mileage: 0,
                 price: 0,
                 imagesCount: 0,
