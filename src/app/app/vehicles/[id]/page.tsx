@@ -551,16 +551,16 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
             return litres.toFixed(1);
         })();
         return {
-            trim: String(vehicle?.trim || '').trim(),
-            fuelType: String(vehicle?.fuelType || '').trim(),
-            transmission: String(vehicle?.transmission || vehicle?.transmissionType || '').trim(),
-            drivetrain: String(vehicle?.drivetrain || vehicle?.driveTrain || '').trim(),
-            doors: vehicle?.doors != null ? String(vehicle.doors) : '',
-            minEngineSize: engineStr,
-            maxEngineSize: engineStr,
+            trim: '',
+            fuelType: '',
+            transmission: '',
+            drivetrain: '',
+            doors: '',
+            minEngineSize: '',
+            maxEngineSize: '',
             minMileage: '', maxMileage: '',
-            minYear: String(Math.max(2010, Number(vehicle?.year || 2015) - 2)),
-            maxYear: String(Number(vehicle?.year || 2025) + 2),
+            minYear: String(Math.max(2010, Number(vehicle?.year || 2015) - 1)),
+            maxYear: String(Number(vehicle?.year || 2025) + 1),
             condition: '',
         };
     });
@@ -4249,6 +4249,11 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [spValuationError, setSpValuationError] = useState('');
     const [spShowTrend, setSpShowTrend] = useState(false);
     const [spShowProfit, setSpShowProfit] = useState(false);
+    const [spShowPrivateVal, setSpShowPrivateVal] = useState(false);
+    const [spShowSupplyDemand, setSpShowSupplyDemand] = useState(false);
+    const [spHideValuation, setSpHideValuation] = useState(false);
+    const [spHideMetrics, setSpHideMetrics] = useState(false);
+    const [spHidePricing, setSpHidePricing] = useState(false);
     const [showFundingProvider, setShowFundingProvider] = useState(false);
     const [addCostTab, setAddCostTab] = useState<'invoice' | 'without'>('without');
     const [newCostFields, setNewCostFields] = useState({ category: '', date: '', supplier: '', reference: '', cost: '', vatRate: '20' });
@@ -6914,7 +6919,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             const newCostTotal = parseFloat((newCostCost + newCostVat).toFixed(2));
                             const COST_CATEGORIES = ['Advertising', 'Bodywork', 'Buyers Fee', 'Delivery', 'Electric Charge', 'Finance', 'Fuel', 'Insurance', 'MOT', 'Paint', 'Part Exchange', 'Photography', 'Preparation', 'Reconditioning', 'Service', 'Sourcing Fee', 'Tinting', 'Tyres', 'Valeting', 'Warranty', 'Other'];
                             return (
-                                <div className="space-y-6 max-w-4xl">
+                                <div className="space-y-6">
                                     {/* ── Purchase Details ── */}
                                     <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
                                         <div className="p-6 space-y-5">
@@ -7204,11 +7209,21 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             const purchasePrice = Number(vehicle.purchasePrice) || 0;
                             const additionalCostTotal = vehicleAdditionalCosts.reduce((s: number, c: any) => s + (c.cost || 0), 0);
                             const grossProfit = websitePrice - purchasePrice;
-                            const marginalVat = (editFields.vatStatus as string) === 'Marginal' && grossProfit > 0 ? parseFloat((grossProfit / 6).toFixed(2)) : 0;
+                            const vatStatus = (editFields.vatStatus as string) || 'Marginal';
+                            const marginalVat = vatStatus === 'Marginal' && grossProfit > 0 ? parseFloat((grossProfit / 6).toFixed(2)) : 0;
                             const netProfit = grossProfit - marginalVat - additionalCostTotal;
-                            const retailVal = spValuation?.valuations?.find((v: any) => v.valuationType === 'Retail')?.amountGBP || 0;
+                            const retailValObj = spValuation?.valuations?.find((v: any) => v.valuationType === 'Retail');
+                            const retailVal = retailValObj?.amountGBP || 0;
                             const pricePosition = retailVal > 0 ? Math.min(Math.round((websitePrice / retailVal) * 100), 100) : 0;
-                            const priceIndicator = pricePosition <= 95 ? { label: 'Great Price', color: '#00C896' } : pricePosition <= 105 ? { label: 'Good Price', color: '#00C896' } : pricePosition <= 115 ? { label: 'Fair Price', color: '#F59E0B' } : { label: 'High Price', color: '#EF4444' };
+                            const atRating = retailValObj?.priceIndicatorRating as string | undefined;
+                            const priceIndicator = atRating === 'GREAT' ? { label: 'Great Price', color: '#00C896' }
+                                : atRating === 'GOOD' ? { label: 'Good Price', color: '#00C896' }
+                                : atRating === 'FAIR' ? { label: 'Fair Price', color: '#F59E0B' }
+                                : atRating === 'HIGH' ? { label: 'High Price', color: '#EF4444' }
+                                : pricePosition <= 95 ? { label: 'Great Price', color: '#00C896' }
+                                : pricePosition <= 105 ? { label: 'Good Price', color: '#00C896' }
+                                : pricePosition <= 115 ? { label: 'Fair Price', color: '#F59E0B' }
+                                : { label: 'High Price', color: '#EF4444' };
                             const loadValuation = async () => {
                                 setSpValuationLoading(true);
                                 setSpValuationError('');
@@ -7226,7 +7241,15 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 setSpValuationLoading(false);
                             };
                             return (
-                                <div className="space-y-5 max-w-4xl">
+                                <div className="space-y-5">
+                                    {/* ── Section Header ── */}
+                                    <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm px-6 py-4 flex items-center justify-between">
+                                        <h2 className="text-[15px] font-bold text-slate-800">Vehicle Stock &amp; Price</h2>
+                                        <span className={`text-[12px] font-bold px-3 py-1.5 rounded text-white ${vehicle.status === 'Sold' ? 'bg-emerald-500' : vehicle.status === 'Reserved' ? 'bg-amber-500' : 'bg-[#4D7CFF]'}`}>
+                                            {vehicle.status || 'For Sale'}
+                                        </span>
+                                    </div>
+
                                     {/* ── Stock Details ── */}
                                     <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
                                         <div className="p-6 space-y-5">
@@ -7236,7 +7259,21 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                     <FieldLabel>Stock ID</FieldLabel>
                                                     <input type="text" readOnly value={vehicle.stockId || (vehicle as any)._id?.slice(-8)?.toUpperCase() || ''} className={`${inputClasses} bg-slate-50 cursor-default`} />
                                                 </div>
-                                                <TextInput label="Location" value={editFields.location as string} field="location" placeholder="Start typing to search..." />
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <FieldLabel>Location</FieldLabel>
+                                                        <button className="text-[11px] font-semibold text-[#4D7CFF] flex items-center gap-1 hover:underline">
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                                            New Location
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <input type="text" value={(editFields.location as string) || ''} onChange={e => updateField('location', e.target.value)} placeholder="Start typing to search..." className={`${inputClasses} flex-1`} />
+                                                        <button className="w-9 h-9 bg-[#4D7CFF] rounded-md flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors">
+                                                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                                                 <TextInput label="VIN" value={editFields.vin as string} field="vin" placeholder="" />
@@ -7297,24 +7334,57 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         <div className="flex gap-6">
                                             {['Marginal', 'VAT Qualifying'].map(o => (
                                                 <label key={o} className="flex items-center gap-2 cursor-pointer">
-                                                    <input type="radio" checked={(editFields.vatStatus as string) === o} onChange={() => updateField('vatStatus', o)} className="w-4 h-4 text-[#4D7CFF]" />
+                                                    <input type="radio" checked={((editFields.vatStatus as string) || 'Marginal') === o} onChange={() => updateField('vatStatus', o)} className="w-4 h-4 text-[#4D7CFF]" />
                                                     <span className="text-[13px] text-slate-700">{o}</span>
                                                 </label>
                                             ))}
                                         </div>
                                     </div>
 
+                                    {/* ── Restore hidden sections ── */}
+                                    {(spHideValuation || spHideMetrics || spHidePricing) && (
+                                        <div className="flex gap-2 flex-wrap">
+                                            {spHideValuation && (
+                                                <button onClick={() => setSpHideValuation(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-emerald-700 border border-emerald-300 bg-emerald-50 rounded px-3 py-1.5 hover:bg-emerald-100 transition-colors">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    Show Valuation
+                                                </button>
+                                            )}
+                                            {spHideMetrics && (
+                                                <button onClick={() => setSpHideMetrics(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-teal-700 border border-teal-300 bg-teal-50 rounded px-3 py-1.5 hover:bg-teal-100 transition-colors">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    Show Vehicle Metrics
+                                                </button>
+                                            )}
+                                            {spHidePricing && (
+                                                <button onClick={() => setSpHidePricing(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-[#4D7CFF] border border-[#DCE4FF] bg-blue-50 rounded px-3 py-1.5 hover:bg-blue-100 transition-colors">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    Show Pricing
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {/* ── Valuation ── */}
+                                    {!spHideValuation && (
                                     <div className="rounded-xl overflow-hidden border border-emerald-200" style={{background: '#F0FDF9'}}>
-                                        <div className="px-6 py-4 flex items-center justify-between">
+                                        <div className="px-6 py-4 flex items-center justify-between gap-3">
                                             <div className="flex items-center gap-2">
                                                 <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
                                                 <span className="text-[15px] font-bold text-emerald-800">Valuation</span>
                                             </div>
-                                            <button onClick={loadValuation} disabled={spValuationLoading} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors flex items-center gap-1.5">
-                                                {spValuationLoading ? <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" /> : null}
-                                                {spValuation ? 'Refresh Valuation' : 'Load Valuation'}
-                                            </button>
+                                            <div className="flex items-center gap-2 ml-auto">
+                                                {spValuation?.valuations?.find((v: any) => v.valuationType === 'Private') && (
+                                                    <button onClick={() => setSpShowPrivateVal(p => !p)} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors">
+                                                        {spShowPrivateVal ? 'Hide Private Valuation' : 'Show Private Valuation'}
+                                                    </button>
+                                                )}
+                                                <button onClick={loadValuation} disabled={spValuationLoading} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors flex items-center gap-1.5">
+                                                    {spValuationLoading ? <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" /> : null}
+                                                    {spValuation ? 'Refresh Valuation' : 'Load Valuation'}
+                                                </button>
+                                                <button onClick={() => setSpHideValuation(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
+                                            </div>
                                         </div>
                                         {spValuationError && !spValuation && (
                                             <div className="px-6 pb-5 flex items-center gap-3 text-[13px] text-red-600 bg-red-50 border-t border-red-100 py-3">
@@ -7341,25 +7411,90 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                         );
                                                     })}
                                                 </div>
-                                                <div className="px-6 pb-4">
-                                                    <button onClick={() => setSpShowTrend(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
-                                                        <svg className={`w-3 h-3 transition-transform ${spShowTrend ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
-                                                        Show Valuation Trend
-                                                    </button>
+                                                <div className="px-6 pb-4 space-y-3">
+                                                    {/* Show Private Valuation panel */}
+                                                    {spShowPrivateVal && (() => {
+                                                        const privateVal = spValuation.valuations?.find((v: any) => v.valuationType === 'Private');
+                                                        return (
+                                                            <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
+                                                                <div className="text-[12px] font-semibold text-emerald-700 mb-1">Private Valuation</div>
+                                                                <div className="text-[24px] font-bold text-emerald-800">£{privateVal?.amountGBP?.toLocaleString()}</div>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {/* Show Valuation Trend button + panel */}
+                                                    {spValuation?.trend && (
+                                                        <>
+                                                            <button onClick={() => setSpShowTrend(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
+                                                                <svg className={`w-3 h-3 transition-transform ${spShowTrend ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                                {spShowTrend ? 'Hide Valuation Trend' : 'Show Valuation Trend'}
+                                                            </button>
+                                                            {spShowTrend && (() => {
+                                                                const trend = spValuation.trend;
+                                                                const periods = [
+                                                                    { label: '+30 Days', key: 'plus30Days' },
+                                                                    { label: '+60 Days', key: 'plus60Days' },
+                                                                    { label: '+90 Days', key: 'plus90Days' },
+                                                                ];
+                                                                const rows = [
+                                                                    { label: 'Trade', key: 'trade' },
+                                                                    { label: 'Part Exchange', key: 'partExchange' },
+                                                                    { label: 'Retail', key: 'retail' },
+                                                                ];
+                                                                return (
+                                                                    <div className="mt-2 overflow-x-auto rounded-lg border border-emerald-100">
+                                                                        <table className="w-full text-[12px]">
+                                                                            <thead>
+                                                                                <tr className="bg-emerald-50">
+                                                                                    <th className="px-4 py-2 text-left font-semibold text-emerald-700"></th>
+                                                                                    {periods.map(p => (
+                                                                                        <th key={p.key} className="px-4 py-2 text-center font-semibold text-emerald-700">{p.label}</th>
+                                                                                    ))}
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                {rows.map((row, i) => (
+                                                                                    <tr key={row.key} className={i % 2 === 0 ? 'bg-white' : 'bg-emerald-50/40'}>
+                                                                                        <td className="px-4 py-2.5 font-semibold text-slate-600">{row.label}</td>
+                                                                                        {periods.map(p => {
+                                                                                            const amt = trend[p.key]?.[row.key]?.amountGBP;
+                                                                                            return (
+                                                                                                <td key={p.key} className="px-4 py-2.5 text-center font-semibold text-slate-800">
+                                                                                                    {amt != null ? `£${amt.toLocaleString()}` : '—'}
+                                                                                                </td>
+                                                                                            );
+                                                                                        })}
+                                                                                    </tr>
+                                                                                ))}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </>
+                                                    )}
                                                 </div>
                                             </>
                                         ) : (
                                             <div className="px-6 pb-5 text-[13px] text-emerald-600">Click &quot;Load Valuation&quot; to fetch AT Trade, Part Ex &amp; Retail valuations.</div>
                                         )}
                                     </div>
+                                    )}
 
                                     {/* ── Vehicle Metrics ── */}
-                                    {spValuation?.metrics && (
+                                    {spValuation?.metrics && !spHideMetrics && (
                                         <div className="rounded-xl overflow-hidden border border-teal-200" style={{background: '#F0FDFA'}}>
-                                            <div className="px-6 py-4 flex items-center justify-between">
+                                            <div className="px-6 py-4 flex items-center justify-between gap-3">
                                                 <div className="flex items-center gap-2">
                                                     <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                                                     <span className="text-[15px] font-bold text-teal-800">Vehicle Metrics</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 ml-auto">
+                                                    <button onClick={() => setSpShowSupplyDemand(p => !p)} className="text-[12px] font-semibold text-teal-700 border border-teal-300 rounded px-3 py-1 hover:bg-teal-50 transition-colors">
+                                                        {spShowSupplyDemand ? 'Hide Supply & Demand' : 'Show Supply & Demand'}
+                                                    </button>
+                                                    <button onClick={() => setSpHideMetrics(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
                                                 </div>
                                             </div>
                                             <div className="text-[12px] text-teal-600 px-6 pb-3">Market insights powered by AutoTrader.</div>
@@ -7375,11 +7510,48 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                     </div>
                                                 ))}
                                             </div>
+                                            {spShowSupplyDemand && (() => {
+                                                const vm = spValuation.metrics?.vehicleMetrics;
+                                                const sdItems = [
+                                                    { label: 'Live Retail Adverts', value: vm?.liveRetailAdverts != null ? String(vm.liveRetailAdverts) : null, desc: 'Total similar vehicles for sale (supply)' },
+                                                    { label: 'Total Retail Adverts', value: vm?.totalRetailAdverts != null ? String(vm.totalRetailAdverts) : null, desc: 'All retail adverts in market' },
+                                                    { label: 'Forecasted Days to Sell', value: vm?.forecastedDaysToSell != null ? `${vm.forecastedDaysToSell} days` : null, desc: 'Predicted days based on market demand' },
+                                                    { label: 'Market Position', value: vm?.liveRetailPercentage != null ? `${vm.liveRetailPercentage}%` : null, desc: 'How your vehicle compares to market' },
+                                                ].filter(i => i.value != null);
+                                                return (
+                                                    <div className="px-6 pb-5">
+                                                        {sdItems.length > 0 ? (
+                                                            <div className="grid grid-cols-2 gap-3">
+                                                                {sdItems.map(item => (
+                                                                    <div key={item.label} className="bg-teal-50 rounded-lg p-3 border border-teal-100">
+                                                                        <div className="text-[11px] text-teal-500 mb-0.5">{item.label}</div>
+                                                                        <div className="text-[18px] font-bold text-teal-800">{item.value}</div>
+                                                                        <div className="text-[10px] text-teal-400 mt-0.5 italic">{item.desc}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-[13px] text-teal-600 bg-teal-50 rounded-lg p-3 border border-teal-100">Supply &amp; demand data not available for this vehicle.</div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
 
                                     {/* ── Pricing ── */}
+                                    {!spHidePricing && (
                                     <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
+                                        <div className="px-6 py-4 flex items-center justify-between border-b border-[#E2E8F0]">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+                                                    <span className="text-[15px] font-bold text-slate-800">Pricing</span>
+                                                </div>
+                                                <div className="text-[12px] text-slate-400 mt-0.5">Based on retail valuation and AutoTrader market position.</div>
+                                            </div>
+                                            <button onClick={() => setSpHidePricing(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
+                                        </div>
                                         <div className="p-6 space-y-5">
                                             {retailVal > 0 && (
                                                 <div className="grid grid-cols-2 gap-4">
@@ -7387,7 +7559,10 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                         <div className="text-[12px] font-semibold text-slate-500 mb-2 text-center">Price Position</div>
                                                         <div className="flex items-center gap-3">
                                                             <div className="flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                                                                <div className="h-full rounded-full transition-all" style={{width: `${pricePosition}%`, background: priceIndicator.color}} />
+                                                                <div className="h-full rounded-full transition-all" style={{
+                                                                    width: `${pricePosition}%`,
+                                                                    background: `repeating-linear-gradient(45deg, ${priceIndicator.color}, ${priceIndicator.color} 4px, transparent 4px, transparent 8px)`
+                                                                }} />
                                                             </div>
                                                             <span className="text-[13px] font-bold text-slate-700">{pricePosition}%</span>
                                                         </div>
@@ -7413,7 +7588,10 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <FieldLabel>Sales Channel Price <span className="text-[10px] text-slate-400 font-normal">(AT / forecourt)</span></FieldLabel>
+                                                    <div className="flex items-center gap-1 mb-1.5">
+                                                        <FieldLabel>Sales Channel Price</FieldLabel>
+                                                        <span title="Set a different price for your sales channels (e.g. AutoTrader). Leave blank to use the website price." className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#4D7CFF] text-[#4D7CFF] text-[9px] font-bold cursor-help">?</span>
+                                                    </div>
                                                     <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
                                                         <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
                                                         <input type="number" value={editForecourtPrice} onChange={e => setEditForecourtPrice(e.target.value)} placeholder={String(websitePrice || '')} className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none" />
@@ -7431,7 +7609,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                             <div>
                                                 <button onClick={() => setSpShowProfit(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-[#4D7CFF]">
                                                     <svg className={`w-3 h-3 transition-transform ${spShowProfit ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
-                                                    Show Profit Calculations
+                                                    {spShowProfit ? 'Hide Profit Calculations' : 'Show Profit Calculations'}
                                                 </button>
                                                 {spShowProfit && (
                                                     <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -7454,12 +7632,16 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                             </div>
                                         </div>
                                     </div>
+                                    )}
 
                                     {/* ── Quantity Available (To Order only) ── */}
                                     {vehicle.status === 'To Order' && (
                                         <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm p-6">
                                             <div className="max-w-xs">
-                                                <FieldLabel>Quantity Available</FieldLabel>
+                                                <div className="flex items-center gap-1 mb-1.5">
+                                                    <FieldLabel>Quantity Available</FieldLabel>
+                                                    <span title="The number of in-stock versions that can be created. Counted against your membership plan's Vehicles For Sale limit." className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#4D7CFF] text-[#4D7CFF] text-[9px] font-bold cursor-help">?</span>
+                                                </div>
                                                 <input type="number" value={editFields.quantityAvailable || ''} onChange={e => updateField('quantityAvailable', e.target.value)} className={inputClasses} />
                                             </div>
                                         </div>

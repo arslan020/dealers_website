@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import connectToDatabase from '@/lib/db';
+import Tenant from '@/models/Tenant';
 
 const AUTOTRADER_BASE_URL = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
 
@@ -38,43 +40,45 @@ async function getCompetitors(req: NextRequest) {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        // Step 1: Get vehicle data with features+competitors in one request — only if make/model
-        // not already supplied by the caller (they usually are, from the vehicle detail page).
+        // Get dealer postcode for distance calculation
+        await connectToDatabase();
+        const tenant = await Tenant.findById(session.tenantId).select('autoTraderConfig businessProfile');
+        const dealerPostcode: string =
+            (tenant as any)?.autoTraderConfig?.postcode ||
+            (tenant as any)?.businessProfile?.postcode ||
+            '';
+
+        // Step 1: Always fetch the AT-curated competitor URL via /vehicles?competitors=true.
+        // This gives us AT's pre-built URL which includes registration!=VRM, minPlate/maxPlate,
+        // make, model — all correctly set by AT. We use it as the base search URL.
         let vehicleData: any = null;
         let competitorUrl: string | undefined;
 
-        const hasMakeModel = !!(searchParams.get('make') && searchParams.get('model'));
+        try {
+            vehicleData = await client.get('/vehicles', {
+                registration: vrm,
+                advertiserId: client.dealerId || '',
+                competitors: 'true',
+            });
 
-        if (!hasMakeModel) {
-            try {
-                vehicleData = await client.get('/vehicles', {
-                    registration: vrm,
-                    advertiserId: client.dealerId || '',
-                    features: 'true',
-                    competitors: 'true',
-                });
+            competitorUrl =
+                vehicleData?.links?.competitors?.href
+                ?? vehicleData?.vehicle?.links?.competitors?.href
+                ?? vehicleData?.vehicle?.competitorUrl
+                ?? vehicleData?.vehicle?.competitors?.searchUrl
+                ?? vehicleData?.competitors?.searchUrl
+                ?? vehicleData?.competitorUrl
+                ?? undefined;
 
-                competitorUrl =
-                    vehicleData?.links?.competitors?.href
-                    ?? vehicleData?.vehicle?.links?.competitors?.href
-                    ?? vehicleData?.vehicle?.competitorUrl
-                    ?? vehicleData?.vehicle?.competitors?.searchUrl
-                    ?? vehicleData?.competitors?.searchUrl
-                    ?? vehicleData?.competitorUrl
-                    ?? undefined;
-
-            } catch (e: any) {
-                console.error('[Competitors] VRM lookup failed:', e.message);
-            }
+        } catch (e: any) {
+            console.error('[Competitors] VRM lookup failed:', e.message);
         }
 
         // Step 2: Build search URL
         const accessToken = await (client as any).getAccessToken();
 
-
         let searchUrl: URL;
 
-        // Build from make/model using either AT response (preferred) or query params
         const v = vehicleData?.vehicle || {};
         const standardMake = v.standardMake || v.make || searchParams.get('make') || '';
         const standardModel = v.standardModel || v.model || searchParams.get('model') || '';
@@ -87,21 +91,38 @@ async function getCompetitors(req: NextRequest) {
             searchParams.get('year') ||
             '';
 
-        if (!standardMake || !standardModel) {
-            // If we can't determine taxonomy, fall back to competitorUrl if present
-            if (competitorUrl && competitorUrl.startsWith('http')) {
-                searchUrl = new URL(competitorUrl);
-            } else {
-                return NextResponse.json({
-                    ok: true,
-                    competitors: [],
-                    total: 0,
-                    vehicle: v,
-                    warning: 'Could not determine make/model for competitor search. Ensure vehicle has AutoTrader stock linked.',
-                });
+        if (competitorUrl && competitorUrl.startsWith('http')) {
+            // AT returns a curated URL with very specific filters (trim, BHP, drivetrain etc.)
+            // These are too restrictive — extract only the broad params and build a clean URL.
+            const atUrl = new URL(competitorUrl);
+            const baseHost = atUrl.origin; // use AT's host (sandbox or production) as-is
+            searchUrl = new URL(`${baseHost}/stock`);
+
+            // Keep only the essential broad params from AT's URL
+            const keepParams = ['searchType', 'valuations', 'advertiserId', 'standardMake', 'standardModel'];
+            for (const p of keepParams) {
+                const val = atUrl.searchParams.get(p);
+                if (val) searchUrl.searchParams.set(p, val);
             }
-        } else {
-            // Default competitor stock search (broad + filterable)
+
+            // Keep plate range (AT's year filter) — only if no user year override
+            const minPlate = atUrl.searchParams.get('minPlate');
+            const maxPlate = atUrl.searchParams.get('maxPlate');
+            if (minPlate) searchUrl.searchParams.set('minPlate', minPlate);
+            if (maxPlate) searchUrl.searchParams.set('maxPlate', maxPlate);
+
+            // Ensure advertiserId
+            if (!searchUrl.searchParams.has('advertiserId')) {
+                searchUrl.searchParams.set('advertiserId', client.dealerId || '');
+            }
+
+            // Append registration exclusion as raw string (avoids %21 encoding of !)
+            const baseSearchUrl = searchUrl.toString();
+            const registrationExclusion = `registration!=${encodeURIComponent(vrm)}`;
+            searchUrl = new URL(`${baseSearchUrl}&${registrationExclusion}`);
+
+        } else if (standardMake && standardModel) {
+            // Fallback: build manually when AT didn't return a competitor URL
             searchUrl = new URL(`${AUTOTRADER_BASE_URL}/stock`);
             searchUrl.searchParams.set('advertiserId', client.dealerId || '');
             searchUrl.searchParams.set('searchType', 'competitor');
@@ -109,12 +130,20 @@ async function getCompetitors(req: NextRequest) {
             searchUrl.searchParams.set('vehicleMetrics', 'true');
             searchUrl.searchParams.set('standardMake', standardMake);
             searchUrl.searchParams.set('standardModel', standardModel);
-
             if (year) {
-                // If UI provides min/max year it will override below; otherwise base around vehicle year.
                 searchUrl.searchParams.set('minManufacturedYear', String(Number(year) - 2));
                 searchUrl.searchParams.set('maxManufacturedYear', String(Number(year) + 2));
             }
+            // Append registration exclusion as raw string
+            searchUrl = new URL(`${searchUrl.toString()}&registration!=${encodeURIComponent(vrm)}`);
+        } else {
+            return NextResponse.json({
+                ok: true,
+                competitors: [],
+                total: 0,
+                vehicle: v,
+                warning: 'Could not determine make/model for competitor search. Ensure vehicle has AutoTrader stock linked.',
+            });
         }
 
         // Ensure valuations are included (needed for Avg. Valuation)
@@ -145,7 +174,11 @@ async function getCompetitors(req: NextRequest) {
             sort:          'sort',
         };
 
+        // If AT URL already has plate-based year range, skip year filters to avoid double-filtering
+        const hasPlateRange = searchUrl.searchParams.has('minPlate') || searchUrl.searchParams.has('maxPlate');
+
         for (const [qParam, atParam] of Object.entries(filterMap)) {
+            if (hasPlateRange && (qParam === 'minYear' || qParam === 'maxYear')) continue;
             const val = searchParams.get(qParam);
             if (val && val !== '') {
                 searchUrl.searchParams.set(atParam, val);
@@ -160,6 +193,11 @@ async function getCompetitors(req: NextRequest) {
         searchUrl.searchParams.set('pageSize', String(perPage));
         searchUrl.searchParams.set('page', '1');
         searchUrl.searchParams.set('advertiserId', client.dealerId || '');
+
+        // Pass dealer postcode so AT returns distance for each competitor
+        if (dealerPostcode) {
+            searchUrl.searchParams.set('postcode', dealerPostcode);
+        }
 
         const vehicleForFallback = vehicleData?.vehicle || {};
 
@@ -435,7 +473,7 @@ async function getCompetitors(req: NextRequest) {
                 condition:           v.condition || item?.condition || null,
                 mileage:             v.odometerReadingMiles ?? null,
                 daysOnForecourt,
-                distance:            null,
+                distance:            item.metadata?.distance ?? item.distance ?? null,
                 optionalExtrasCount: featuresArr.length,
                 fullDealershipHistory,
                 options: featuresArr.map((f: any) => (typeof f === 'string' ? f : f?.name)).filter(Boolean),

@@ -30,7 +30,7 @@ async function getVehicleValuation(req: NextRequest) {
     };
     const conditionRating = CONDITION_MAP[(cr || condition || '').toLowerCase()];
 
-    if (!mileage) {
+    if (mileage == null || mileage === '') {
         return NextResponse.json({ ok: false, error: { message: 'mileage is required.', code: 'VALIDATION_ERROR' } }, { status: 400 });
     }
     if (!vrm && !derivativeId) {
@@ -141,7 +141,24 @@ async function getVehicleValuation(req: NextRequest) {
             daysToSell: typeof daysToSellRaw === 'object' ? (daysToSellRaw?.value ?? null) : (daysToSellRaw ?? null),
         } : null;
 
-        return NextResponse.json({ ok: true, valuations: valuationsArray, metrics });
+        // Fetch trended valuations (30/60/90 day trend) for this specific VRM
+        let trend: any = null;
+        if (vrm) {
+            try {
+                const registration = (vrm as string).toUpperCase().replace(/\s/g, '');
+                const trendRes = await client.get('/stock', {
+                    advertiserId: client.dealerId!,
+                    registration,
+                    trendedValuations: 'true',
+                });
+                const item = trendRes?.results?.[0] ?? trendRes;
+                trend = item?.trendedValuations ?? null;
+            } catch {
+                // optional — don't fail the whole request
+            }
+        }
+
+        return NextResponse.json({ ok: true, valuations: valuationsArray, metrics, trend });
 
     } catch (error: any) {
         console.error('[Valuation API Error]', error.message);
