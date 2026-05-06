@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import VehicleDocument from '@/models/VehicleDocument';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -16,7 +16,7 @@ async function patchDocument(req: NextRequest, context: Ctx) {
     const doc = await VehicleDocument.findOneAndUpdate(
         { _id: docId, vehicleId: new mongoose.Types.ObjectId(id), tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: { ...(body.name !== undefined && { name: body.name }), ...(body.description !== undefined && { description: body.description }), ...(body.status !== undefined && { status: body.status }) } },
-        { new: true, projection: { fileData: 0 } }
+        { returnDocument: 'after', projection: { fileData: 0 } }
     );
     if (!doc) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, document: doc });

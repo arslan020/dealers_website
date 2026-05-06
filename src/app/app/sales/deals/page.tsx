@@ -16,6 +16,7 @@ interface Deal {
     reservation?: { status: string | null; fee?: { amountGBP: number; status: string } };
     messages?: { id: string; lastUpdated: string } | null;
     buyingSignals?: { intent?: string; dealIntentScore?: number };
+    calls?: { id: string | null; lastUpdated: string | null } | null;
 }
 
 const AVATAR_COLORS = ['bg-[#4ca7ba]', 'bg-[#e8b57b]', 'bg-[#59b889]', 'bg-[#57a1e0]', 'bg-[#6e7ebf]', 'bg-[#8c8c8c]'];
@@ -29,14 +30,28 @@ function initials(first?: string, last?: string) {
     return `${first?.charAt(0) ?? ''}${last?.charAt(0) ?? ''}`.toUpperCase();
 }
 
+/** Customer is active = messages updated within the last 30 minutes */
+function isCustomerActive(deal: Deal): boolean {
+    if (!deal.messages?.lastUpdated) return false;
+    return Date.now() - new Date(deal.messages.lastUpdated).getTime() < 30 * 60 * 1000;
+}
+
+/** Deal is locked = reservation payment is Held (customer has paid deposit) */
+function isDealLocked(deal: Deal): boolean {
+    return deal.reservation?.fee?.status === 'Held' &&
+        deal.advertiserDealStatus !== 'Complete' &&
+        deal.advertiserDealStatus !== 'Completed' &&
+        deal.advertiserDealStatus !== 'Cancelled';
+}
+
 /* Progress icons — circular MotorDesk style */
 function ProgressIcons({ deal }: { deal: Deal }) {
-    const hasReservation = deal.reservation?.status === 'RESERVED';
+    const hasReservation = deal.reservation?.status === 'Reserved';
     const hasInvoice = false;
     const isTransferred =
         deal.advertiserDealStatus === 'Complete' || deal.advertiserDealStatus === 'Completed';
     const hasContact = true;
-    const hasPayment = deal.reservation?.fee?.status === 'Paid';
+    const hasPayment = deal.reservation?.fee?.status === 'Held';
     const hasMsg = !!deal.messages;
     const isDone =
         deal.advertiserDealStatus === 'Complete' || deal.advertiserDealStatus === 'Completed';
@@ -170,8 +185,10 @@ export default function SalesDealsPage() {
                                 const dealNum = String(idx + 1 + (page - 1) * 20).padStart(6, '0');
                                 const vrm = deal.stock?.vrm || deal.stock?.stockId?.slice(0, 8) || '—';
                                 const ref = deal.stock?.searchId?.slice(-6).toUpperCase() || deal.dealId.slice(0, 6).toUpperCase();
+                                const customerActive = isCustomerActive(deal);
+                                const locked = isDealLocked(deal);
                                 return (
-                                    <tr key={deal.dealId} className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
+                                    <tr key={deal.dealId} className={`border-b border-slate-50 hover:bg-slate-50/60 transition-colors ${locked ? 'bg-amber-50/30' : ''}`}>
                                         {/* DEAL */}
                                         <td className="px-4 py-3">
                                             <Link href={`/app/deals/${deal.dealId}`} className="text-[13px] font-bold text-[#4D7CFF] hover:underline">
@@ -185,12 +202,33 @@ export default function SalesDealsPage() {
                                         {/* CUSTOMER */}
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
-                                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 ${AVATAR_COLORS[idx % AVATAR_COLORS.length]}`}>
-                                                    {initials(deal.consumer.firstName, deal.consumer.lastName)}
+                                                {/* Avatar with active pulse ring */}
+                                                <div className="relative flex-shrink-0">
+                                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${AVATAR_COLORS[idx % AVATAR_COLORS.length]}`}>
+                                                        {initials(deal.consumer.firstName, deal.consumer.lastName)}
+                                                    </div>
+                                                    {customerActive && (
+                                                        <>
+                                                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full" />
+                                                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
+                                                        </>
+                                                    )}
                                                 </div>
-                                                <span className="text-[13px] font-semibold text-[#4D7CFF]">
-                                                    {deal.consumer.firstName} {deal.consumer.lastName}
-                                                </span>
+                                                <div>
+                                                    <span className="text-[13px] font-semibold text-[#4D7CFF]">
+                                                        {deal.consumer.firstName} {deal.consumer.lastName}
+                                                    </span>
+                                                    {customerActive && (
+                                                        <p className="text-[10px] font-bold text-emerald-600 leading-none mt-0.5">● Active now</p>
+                                                    )}
+                                                </div>
+                                                {locked && (
+                                                    <span title="Deal is locked — payment held" className="ml-1 text-amber-500">
+                                                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                                            <path d="M12 1C8.676 1 6 3.676 6 7v1H4a1 1 0 00-1 1v13a1 1 0 001 1h16a1 1 0 001-1V9a1 1 0 00-1-1h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v1H8V7c0-2.276 1.724-4 4-4zm0 9a2 2 0 110 4 2 2 0 010-4z"/>
+                                                        </svg>
+                                                    </span>
+                                                )}
                                             </div>
                                         </td>
                                         {/* PROGRESS */}
@@ -201,7 +239,7 @@ export default function SalesDealsPage() {
                                         <td className="px-4 py-3">
                                             {(() => {
                                                 const stage = deal.consumerDealStatus || deal.advertiserDealStatus || '';
-                                                const isPayment = stage.toLowerCase().includes('payment') || stage === 'In Progress';
+                                                const isPayment = stage.toLowerCase().includes('payment') || stage === 'In Progress' || stage === 'In progress';
                                                 const isComplete = stage === 'Complete' || stage === 'Completed';
                                                 const isCancelled = stage === 'Cancelled';
                                                 if (isPayment && !isComplete && !isCancelled)
@@ -215,7 +253,18 @@ export default function SalesDealsPage() {
                                         </td>
                                         {/* SOURCE */}
                                         <td className="px-4 py-3">
-                                            <span className="text-[12px] text-slate-600">AutoTrader</span>
+                                            {(() => {
+                                                const isAutoTrader = !!deal.buyingSignals || deal.reservation?.status != null;
+                                                const label = isAutoTrader ? 'AutoTrader' : 'Deal Builder';
+                                                const cls = isAutoTrader
+                                                    ? 'bg-orange-50 text-orange-600'
+                                                    : 'bg-blue-50 text-[#4D7CFF]';
+                                                return (
+                                                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${cls}`}>
+                                                        {label}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                         {/* REFERENCE */}
                                         <td className="px-4 py-3">
@@ -225,9 +274,11 @@ export default function SalesDealsPage() {
                                         <td className="px-4 py-3">
                                             <span className="text-[12px] text-slate-500">{ago(deal.lastUpdated)}</span>
                                         </td>
-                                        {/* ACCESSED */}
+                                        {/* ACCESSED — last customer activity (messages.lastUpdated) */}
                                         <td className="px-4 py-3">
-                                            <span className="text-[12px] text-slate-500">{ago(deal.lastUpdated)}</span>
+                                            <span className="text-[12px] text-slate-500">
+                                                {deal.messages?.lastUpdated ? ago(deal.messages.lastUpdated) : '—'}
+                                            </span>
                                         </td>
                                         {/* Action */}
                                         <td className="px-4 py-3">

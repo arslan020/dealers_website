@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Job from '@/models/Job';
 import User from '@/models/User';
@@ -115,7 +115,7 @@ async function patchJobHandler(req: NextRequest, { params }: { params?: Promise<
     const updated = await Job.findOneAndUpdate(
         { _id: id, tenantId },
         { $set: allowed },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean();
 
     if (!updated) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });

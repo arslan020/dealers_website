@@ -28,7 +28,7 @@ async function getDealsByStockId(
 
     // Fetch all deals and filter by stockId client-side
     // AT API does not have a direct filter for stockId in the list endpoint
-    const data = await client.getDeals({ pageSize: '100' });
+    const data = await client.getDeals({ pageSize: '50' });
     const allDeals: any[] = data.results || [];
 
     const vehicleDeals = allDeals.filter((d: any) => d.stock?.stockId === stockId);

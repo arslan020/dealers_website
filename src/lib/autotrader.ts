@@ -722,4 +722,80 @@ export class AutoTraderClient {
             { advertiserId: this.dealerId! }
         );
     }
+
+    // ─── Finance (BETA) ───────────────────────────────────────────────────────────
+
+    /**
+     * POST /finance/applications?advertiserId= — create a new finance application.
+     * Required: dealId, applicant (title/firstName/lastName/email),
+     *           financeTerms (productType, termMonths, estimatedAnnualMileage, cashPrice, deposit)
+     * Capability: Finance Updates
+     */
+    async createFinanceApplication(payload: Record<string, any>) {
+        if (!this.dealerId) await this.init();
+        return this.post('/finance/applications', payload, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * GET /finance/applications/{applicationId}?advertiserId= — get a finance application.
+     * Capability: Deal Sync
+     */
+    async getFinanceApplication(applicationId: string) {
+        if (!this.dealerId) await this.init();
+        return this.get(`/finance/applications/${applicationId}`, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * PATCH /finance/applications/{applicationId}?advertiserId= — edit a finance application.
+     * Capability: Finance Updates
+     */
+    async updateFinanceApplication(applicationId: string, payload: Record<string, any>) {
+        if (!this.dealerId) await this.init();
+        return this.patch(`/finance/applications/${applicationId}`, payload, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * POST /finance/applications/{applicationId}/quotes?advertiserId= — generate personalised quotes.
+     * Returns up to 3 lender quotes. Application status becomes "Quoted".
+     * Note: consent.softCheck must be completed before calling this.
+     * Capability: Finance Updates
+     */
+    async getFinanceQuotes(applicationId: string) {
+        if (!this.dealerId) await this.init();
+        return this.post(`/finance/applications/${applicationId}/quotes`, {}, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * GET /finance/applications/{applicationId}/proposals?advertiserId= — list all proposals.
+     * Capability: Finance Updates
+     */
+    async getFinanceProposals(applicationId: string) {
+        if (!this.dealerId) await this.init();
+        return this.get(`/finance/applications/${applicationId}/proposals`, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * POST /finance/applications/{applicationId}/proposals?advertiserId= — send a new proposal.
+     * Body: { quoteId }
+     * Capability: Finance Updates
+     */
+    async sendFinanceProposal(applicationId: string, quoteId: string) {
+        if (!this.dealerId) await this.init();
+        return this.post(`/finance/applications/${applicationId}/proposals`, { quoteId }, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * PATCH /finance/applications/{applicationId}/proposals/{proposalId}?advertiserId=
+     * Set active: { active: true }
+     * Set paid out: { paidOutDate: "YYYY-MM-DD" }
+     * Capability: Finance Updates
+     */
+    async updateFinanceProposal(applicationId: string, proposalId: string, payload: Record<string, any>) {
+        if (!this.dealerId) await this.init();
+        return this.patch(
+            `/finance/applications/${applicationId}/proposals/${proposalId}`,
+            payload,
+            { advertiserId: this.dealerId! }
+        );
+    }
 }

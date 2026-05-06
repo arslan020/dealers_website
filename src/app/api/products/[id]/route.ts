@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Product from '@/models/Product';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -27,7 +27,7 @@ async function updateProduct(req: NextRequest, ctx: Ctx) {
     const product = await Product.findOneAndUpdate(
         { _id: id, tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: body },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean();
     if (!product) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, product });

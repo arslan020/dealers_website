@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import connectToDatabase from '@/lib/db';
 import Lead from '@/models/Lead';
@@ -25,7 +25,9 @@ export async function PUT(req: NextRequest) {
             return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 });
         }
 
-        const advertiserId = bodyJson.advertiserId;
+        // AT docs: advertiserId is inside the 'data' envelope, not at root level
+        // Root structure: { id, time, type, data: { advertiserId, dealId, ... } }
+        const advertiserId = bodyJson.data?.advertiserId;
         if (!advertiserId) {
             return NextResponse.json({ ok: false, error: 'Missing advertiserId in payload' }, { status: 400 });
         }
@@ -39,7 +41,8 @@ export async function PUT(req: NextRequest) {
         }
 
         // Validate HMAC Signature
-        // "autotrader-signature": "t=1690000000,v1=abc123hmac..."
+        // AT docs header format: "autotrader-signature: t=1623882082,v1=6bbf5a26..."
+        // Hash = HMAC-SHA256(secret, timestamp + "." + rawBody)
         const sigParts = signatureHeader.split(',').reduce((acc, part) => {
             const [k, v] = part.split('=');
             if (k && v) acc[k.trim()] = v.trim();
@@ -58,22 +61,25 @@ export async function PUT(req: NextRequest) {
                 .update(signedPayload)
                 .digest('hex');
 
-            // Temporarily disable STRICT HMAC fail in local dev unless enforced
             if (expectedSig !== signature && process.env.NODE_ENV === 'production') {
                 return NextResponse.json({ ok: false, error: 'Invalid HMAC signature' }, { status: 401 });
             }
         }
 
-        // Process webhook event types
-        const { type, deal, stock, message } = bodyJson;
+        // AT docs notification envelope: { id, time, type, data: { ...deal fields } }
+        // 'type' is at root; all deal/advertiser data is under 'data'
+        const { type } = bodyJson;
+        const deal = bodyJson.data; // Contains dealId, advertiserId, advertiserDealStatus, consumer, messages, buyingSignals, etc.
 
-        let statusUpdate = 'NEW_LEAD';
+        let statusUpdate: string;
+        switch (deal?.advertiserDealStatus) {
+            case 'In progress':
+            case 'In Progress': statusUpdate = 'IN_PROGRESS'; break;
+            case 'Completed':   statusUpdate = 'WON'; break;
+            case 'Cancelled':   statusUpdate = 'LOST'; break;
+            default:            statusUpdate = 'NEW_LEAD';
+        }
         if (type === 'DEAL' || type === 'ADVERTISER_UPDATE') {
-            if (deal?.messages && deal.messages.lastUpdated) {
-                statusUpdate = 'NEW_MESSAGE'; // Based on internal rules
-            } else if (deal?.advertiserDealStatus) {
-                statusUpdate = 'IN_PROGRESS'; // Fallback mapping
-            }
             
             // Save / Update Lead in DB for Real Time
             if (deal?.dealId) {
@@ -102,7 +108,7 @@ export async function PUT(req: NextRequest) {
                             ...(orConditions.length > 0 ? { $or: orConditions } : { _id: null })
                         },
                         { $set: customerData },
-                        { upsert: true, new: true }
+                        { upsert: true, returnDocument: 'after' }
                     );
                     customerId = updatedCustomer._id;
                 }
@@ -111,8 +117,8 @@ export async function PUT(req: NextRequest) {
                 const leadData = {
                     dealId: deal.dealId,
                     platform: 'AutoTrader',
-                    status: statusUpdate === 'NEW_MESSAGE' ? 'NEW_LEAD' : statusUpdate, 
-                    messagesId: deal.messages?.messagesId ?? deal.messages?.id ?? null,
+                    status: statusUpdate,
+                    messagesId: deal.messages?.id ?? null, // AT docs: messages object only has 'id' field
                     intentScore: deal.buyingSignals?.dealIntentScore || 0,
                     intentLevel: deal.buyingSignals?.intent || 'Unknown',
                     tenantId: tenant._id,
@@ -122,7 +128,7 @@ export async function PUT(req: NextRequest) {
                 const updatedLead = await Lead.findOneAndUpdate(
                     { dealId: deal.dealId, tenantId: tenant._id },
                     { $set: leadData },
-                    { upsert: true, new: true }
+                    { upsert: true, returnDocument: 'after' }
                 ).populate('customerId');
 
                 // Broadcast SSE event
@@ -144,3 +150,4 @@ export async function PUT(req: NextRequest) {
         return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
     }
 }
+

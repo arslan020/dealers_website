@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Job from '@/models/Job';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -21,7 +21,7 @@ async function deleteTimeCardHandler(
     const job = await Job.findOneAndUpdate(
         { _id: id, tenantId },
         { $pull: { timeCards: { _id: new mongoose.Types.ObjectId(cardId) } } },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean();
 
     if (!job) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });

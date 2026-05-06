@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import TestDrive from '@/models/TestDrive';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -29,7 +29,7 @@ async function updateSession(req: NextRequest, context: Ctx) {
     const session = await TestDrive.findOneAndUpdate(
         { _id: sessionId, vehicleId: new mongoose.Types.ObjectId(id), tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: update },
-        { new: true }
+        { returnDocument: 'after' }
     );
     if (!session) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, session });

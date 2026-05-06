@@ -24,6 +24,16 @@ async function getAutoTraderLeads(req: NextRequest) {
         // API PDF Page 65-66: GET /deals
         const response = await client.getDeals(params);
 
+        function mapAtDealStatus(atStatus: string | undefined): string {
+            switch (atStatus) {
+                case 'In progress':
+                case 'In Progress': return 'IN_PROGRESS';
+                case 'Completed':   return 'WON';
+                case 'Cancelled':   return 'LOST';
+                default:            return 'NEW_LEAD';
+            }
+        }
+
         // Map AutoTrader Deals to UI-friendly Lead structures
         const leads = response.results.map((deal: any) => ({
             id: deal.dealId,
@@ -34,15 +44,16 @@ async function getAutoTraderLeads(req: NextRequest) {
                 phone: deal.consumer.phone
             },
             vehicle: {
-                stockId: deal.stock.stockId,
-                searchId: deal.stock.searchId
+                stockId: deal.stock?.stockId,
+                searchId: deal.stock?.searchId
             },
-            status: deal.advertiserDealStatus,
+            status: mapAtDealStatus(deal.advertiserDealStatus),
+            atDealStatus: deal.advertiserDealStatus,
             created: deal.created,
             lastUpdated: deal.lastUpdated,
             intentScore: deal.buyingSignals?.dealIntentScore,
             intentLevel: deal.buyingSignals?.intent,
-            messagesId: deal.messages?.messagesId ?? deal.messages?.id
+            messagesId: deal.messages?.id ?? deal.messages?.messagesId ?? null
         }));
 
         return NextResponse.json({

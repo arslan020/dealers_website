@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Job from '@/models/Job';
 import User from '@/models/User';
@@ -34,7 +34,7 @@ async function addTimeCardHandler(req: NextRequest, { params }: { params: Promis
                 },
             },
         },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean() as any;
 
     if (!job) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });

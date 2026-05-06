@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
@@ -75,11 +75,13 @@ async function getDeals(req: NextRequest) {
     // Shape the results for the UI and Sync to DB
     const deals = await Promise.all((data.results || []).map(async (d: any) => {
         
-        let statusUpdate = 'NEW_LEAD';
-        if (d.messages && d.messages.lastUpdated) {
-            statusUpdate = 'NEW_MESSAGE';
-        } else if (d.advertiserDealStatus && d.advertiserDealStatus !== 'New') {
-            statusUpdate = 'IN_PROGRESS';
+        let statusUpdate: string;
+        switch (d.advertiserDealStatus) {
+            case 'In progress':
+            case 'In Progress': statusUpdate = 'IN_PROGRESS'; break;
+            case 'Completed':   statusUpdate = 'WON'; break;
+            case 'Cancelled':   statusUpdate = 'LOST'; break;
+            default:            statusUpdate = 'NEW_LEAD';
         }
         
         // Upsert Customer
@@ -107,7 +109,7 @@ async function getDeals(req: NextRequest) {
                     ...(orConditions.length > 0 ? { $or: orConditions } : { _id: null }) // fallback if no contact
                 },
                 { $set: customerData },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
             customerId = updatedCustomer._id;
         }
@@ -118,9 +120,9 @@ async function getDeals(req: NextRequest) {
             await Lead.findOneAndUpdate(
                 { dealId: resolvedDealId, tenantId: session.tenantId },
                 { 
-                    $setOnInsert: { 
+                    $setOnInsert: {
                         platform: 'AutoTrader',
-                        status: statusUpdate === 'NEW_MESSAGE' ? 'NEW_LEAD' : statusUpdate, 
+                        status: statusUpdate,
                         createdAt: d.created ? new Date(d.created) : new Date()
                     },
                     $set: {
@@ -242,3 +244,4 @@ async function createDeal(req: NextRequest) {
 
 export const GET = withErrorHandler(getDeals);
 export const POST = withErrorHandler(createDeal);
+

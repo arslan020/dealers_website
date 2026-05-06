@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Tenant from '@/models/Tenant';
 import { verifyAccessToken } from '@/lib/auth';
@@ -23,7 +23,7 @@ async function updateTenantConfig(req: NextRequest) {
     const tenant = await Tenant.findByIdAndUpdate(
         session.tenantId,
         { $set: { autoTraderConfig } },
-        { new: true }
+        { returnDocument: 'after' }
     );
 
     if (!tenant) {
@@ -34,3 +34,4 @@ async function updateTenantConfig(req: NextRequest) {
 }
 
 export const PATCH = withErrorHandler(updateTenantConfig);
+

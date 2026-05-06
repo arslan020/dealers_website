@@ -27,7 +27,11 @@ interface Deal {
     created?: string;
     advertiserDealStatus?: string;
     consumer: { firstName: string; lastName: string; email: string; phone?: string; type?: string };
-    price?: { amount?: number; currencyCode?: string };
+    price?: {
+        totalPrice?: { amountGBP?: number };
+        suppliedPrice?: { amountGBP?: number };
+        adminFee?: { amountGBP?: number };
+    };
     buyingSignals?: { intent?: string; dealIntentScore?: number };
     messages?: { id: string; lastUpdated?: string } | null;
 }
@@ -53,9 +57,9 @@ function fmtDate(iso?: string) {
     return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function fmtCurrency(amount?: number, code?: string) {
+function fmtCurrency(amount?: number) {
     if (amount == null) return '—';
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: code || 'GBP' }).format(amount);
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(amount);
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -79,8 +83,7 @@ const STATUS_LABELS: Record<string, string> = {
 const DEAL_STATUS_STYLES: Record<string, string> = {
     Completed: 'bg-green-100 text-green-700',
     Cancelled: 'bg-red-100 text-red-700',
-    Accepted: 'bg-blue-100 text-blue-700',
-    Draft: 'bg-amber-100 text-amber-700',
+    'In progress': 'bg-blue-100 text-blue-700',
 };
 
 /* ─── Create Lead Modal ──────────────────────────────────────────────────────── */
@@ -428,7 +431,7 @@ export function VehicleLeadsDealsTab({ vehicleId, stockId }: Props) {
                                     {/* Status */}
                                     <td className="px-4 py-3.5">
                                         <span className={`text-[11px] font-bold px-2.5 py-1 rounded-md ${DEAL_STATUS_STYLES[deal.advertiserDealStatus || ''] || 'bg-slate-100 text-slate-600'}`}>
-                                            {deal.advertiserDealStatus || 'New'}
+                                            {deal.advertiserDealStatus || 'In progress'}
                                         </span>
                                     </td>
                                     {/* Type */}
@@ -437,7 +440,7 @@ export function VehicleLeadsDealsTab({ vehicleId, stockId }: Props) {
                                     </td>
                                     {/* Total */}
                                     <td className="px-4 py-3.5 text-[13px] font-semibold text-slate-800">
-                                        {fmtCurrency(deal.price?.amount, deal.price?.currencyCode)}
+                                        {fmtCurrency(deal.price?.totalPrice?.amountGBP)}
                                     </td>
                                     {/* Issued */}
                                     <td className="px-4 py-3.5 text-[12px] text-slate-500">

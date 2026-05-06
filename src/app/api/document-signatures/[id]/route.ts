@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import DocumentSignature from '@/models/DocumentSignature';
 import Customer from '@/models/Customer';
@@ -35,7 +35,7 @@ async function updateSignature(req: NextRequest, context: Ctx) {
     const sig = await DocumentSignature.findOneAndUpdate(
         { _id: id, tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: update },
-        { new: true }
+        { returnDocument: 'after' }
     );
     if (!sig) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, signature: sig });

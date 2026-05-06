@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import SalesDocument from '@/models/SalesDocument';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -34,7 +34,7 @@ async function updateDocument(req: NextRequest, context: Ctx) {
     const doc = await SalesDocument.findOneAndUpdate(
         { _id: id, tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: update },
-        { new: true, projection: { fileData: 0 } }
+        { returnDocument: 'after', projection: { fileData: 0 } }
     );
     if (!doc) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, document: doc });

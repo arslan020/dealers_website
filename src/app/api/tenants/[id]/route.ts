@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Tenant from '@/models/Tenant';
 import { verifyAccessToken } from '@/lib/auth';
@@ -53,7 +53,7 @@ export async function PATCH(
         if (autoTraderConfig !== undefined) updates.autoTraderConfig = autoTraderConfig;
 
         await connectToDatabase();
-        const tenant = await Tenant.findByIdAndUpdate(id, updates, { new: true });
+        const tenant = await Tenant.findByIdAndUpdate(id, updates, { returnDocument: 'after' });
         if (!tenant) {
             return NextResponse.json({ ok: false, error: { message: 'Tenant not found.', code: 'NOT_FOUND' } }, { status: 404 });
         }

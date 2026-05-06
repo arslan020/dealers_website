@@ -17,40 +17,25 @@ type Customer = {
 
 type Lead = {
     _id?: string;
-    id?: string; // For AutoTrader mapped id
-    dealId?: string; // For AutoTrader
+    id?: string;
+    dealId?: string;
     source: 'Local' | 'AutoTrader';
     status: string;
     advertiserDealStatus?: string;
     platform?: string;
     message?: string;
     createdAt?: string;
-    created?: string; // For AutoTrader mapping
+    created?: string;
     lastUpdated?: string;
     customerId?: Customer | string;
-    customer?: { // For AutoTrader mapping
-        firstName?: string;
-        lastName?: string;
-        name?: string;
-        email?: string;
-        phone?: string;
-    };
+    customer?: { firstName?: string; lastName?: string; name?: string; email?: string; phone?: string };
     vehicleId?: any;
-    vehicle?: { // For AutoTrader mapping
-        stockId?: string;
-        searchId?: string;
-    };
-    stock?: {
-        stockId?: string;
-        vrm?: string;
-        make?: string;
-        model?: string;
-    };
+    vehicle?: { stockId?: string; searchId?: string };
+    stock?: { stockId?: string; vrm?: string; make?: string; model?: string };
     intentScore?: number;
     intentLevel?: string;
     messagesId?: string;
     assignedTo?: string;
-    assigneeName?: string;
 };
 
 type ChatMessage = {
@@ -59,108 +44,96 @@ type ChatMessage = {
     timestamp: string;
 };
 
+const QUICK_INSERTS = [
+    "Thank you for your enquiry! I'll be in touch shortly.",
+    "This vehicle is still available. Would you like to arrange a viewing?",
+    "Could you let me know your availability for a test drive?",
+    "Happy to answer any questions about the vehicle.",
+    "We're open Mon–Sat 9am–6pm. Feel free to visit anytime.",
+];
+
+const AVATAR_PALETTE = ['#3eb6cd', '#6c757d', '#e67e22', '#9b59b6', '#e74c3c', '#1abc9c', '#3498db'];
+
+function getAvatarColor(name: string) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
 function CRMContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
 
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab === 'customers') {
-            router.replace('/app/contacts');
-        }
+        if (tab === 'customers') router.replace('/app/contacts');
     }, [searchParams, router]);
 
     const [leads, setLeads] = useState<Lead[]>([]);
-    const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
-
-    // Chat State
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
     const [chatLoading, setChatLoading] = useState(false);
     const [newMessage, setNewMessage] = useState('');
     const chatEndRef = useRef<HTMLDivElement>(null);
 
-    // Modal State
+    const [showFilter, setShowFilter] = useState(false);
+    const [showQuickInsert, setShowQuickInsert] = useState(false);
+    const [showActions, setShowActions] = useState(false);
+    const [sendVia, setSendVia] = useState('Email Templ');
+    const [includeThread, setIncludeThread] = useState(false);
+
     const [closeModalLead, setCloseModalLead] = useState<Lead | null>(null);
     const [cancellationReason, setCancellationReason] = useState('Different Vehicle');
     const [isClosingDeal, setIsClosingDeal] = useState(false);
 
-    // Create New Lead Modal
     const [showCreateLead, setShowCreateLead] = useState(false);
-    const [createLeadForm, setCreateLeadForm] = useState({
-        leadType: 'Enquiry',
-        name: '',
-        email: '',
-        sms: '',
-        phone: '',
-        preferredMethod: 'Email',
-        marketingConsent: 'No',
-        avatarColor: '#4D7CFF',
-    });
+    const [createLeadForm, setCreateLeadForm] = useState({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No', avatarColor: '#3eb6cd' });
     const [isCreatingLead, setIsCreatingLead] = useState(false);
 
-    // Acknowledge New Modal
     const [showAcknowledgeNew, setShowAcknowledgeNew] = useState(false);
     const [isAcknowledgingAll, setIsAcknowledgingAll] = useState(false);
 
-    // Filter State
+    const [isCreatingContact, setIsCreatingContact] = useState(false);
+    const [noteText, setNoteText] = useState('');
+    const [appointmentType, setAppointmentType] = useState('Appointment');
+    const [appointmentDate, setAppointmentDate] = useState('');
+    const [appointmentTime, setAppointmentTime] = useState('12:00');
+    const [appointmentPurpose, setAppointmentPurpose] = useState('');
+    const [appointmentReminder, setAppointmentReminder] = useState('Reminder');
+
     const [filterUpdatedIn, setFilterUpdatedIn] = useState('Last 7 Days');
     const [filterType, setFilterType] = useState('All');
     const [filterChannel, setFilterChannel] = useState('All');
     const [filterStatus, setFilterStatus] = useState('All');
     const [filterAssignedTo, setFilterAssignedTo] = useState('All');
+    const [filterSearch, setFilterSearch] = useState('');
+
+    useEffect(() => { fetchLeads(); }, []);
 
     useEffect(() => {
-        fetchLeads();
-    }, []);
-
-    // SSE Setup
-    useEffect(() => {
-
         let reconnectTimeout: NodeJS.Timeout;
         let eventSource: EventSource;
-
         const connect = () => {
             eventSource = new EventSource('/api/leads/stream');
-
-            eventSource.onmessage = (event) => {
+            eventSource.onmessage = (e) => {
                 try {
-                    const data = JSON.parse(event.data);
+                    const data = JSON.parse(e.data);
                     if (data.type === 'connected') return;
-
                     if (data.event === 'WEBHOOK_UPDATE' && data.lead) {
-                        toast.success(`Pipeline Updated: ${data.lead.status.replace(/_/g, ' ')}`, {
-                            icon: '🔄',
-                            style: { borderRadius: '12px', background: '#333', color: '#fff' }
-                        });
-                        // Refresh pipeline or optimistically update
+                        toast.success(`Lead updated: ${data.lead.status.replace(/_/g, ' ')}`, { style: { borderRadius: '8px' } });
                         fetchLeads();
                     }
-                } catch (e) {
-                    console.error("SSE parse error", e);
-                }
+                } catch { /* ignore */ }
             };
-
-            eventSource.onerror = (err) => {
-                console.error('SSE Error, scheduling reconnect...', err);
-                eventSource.close();
-                reconnectTimeout = setTimeout(connect, 3000);
-            };
+            eventSource.onerror = () => { eventSource.close(); reconnectTimeout = setTimeout(connect, 3000); };
         };
-
         connect();
-
-        return () => {
-            clearTimeout(reconnectTimeout);
-            if (eventSource) eventSource.close();
-        };
+        return () => { clearTimeout(reconnectTimeout); if (eventSource) eventSource.close(); };
     }, []);
 
     useEffect(() => {
-        if (chatEndRef.current) {
-            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
+        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }, [chatHistory]);
 
     const fetchLeads = async () => {
@@ -168,159 +141,73 @@ function CRMContent() {
         try {
             const localRes = await fetch('/api/crm/leads');
             const localData = await localRes.json();
-
             let allLeads: Lead[] = [];
-
             if (localData.ok) {
-                allLeads = [...allLeads, ...localData.leads.map((l: any) => ({
-                    ...l,
-                    source: l.platform || 'Local',
-                    // Normalize status: MongoDB may return an object like { name: 'NEW_LEAD' }
-                    status: typeof l.status === 'object' && l.status !== null
-                        ? (l.status.name || l.status.value || String(l.status))
-                        : (l.status || 'NEW_LEAD'),
-                }))];
+                allLeads = localData.leads.map((l: any) => ({
+                    ...l, source: l.platform || 'Local',
+                    status: typeof l.status === 'object' ? (l.status.name || String(l.status)) : (l.status || 'NEW_LEAD'),
+                }));
             }
-
-            // AutoTrader Pagination Loop to handle 50+ deals
-            let page = 1;
-            let hasMore = true;
-            let allATDeals: any[] = [];
-
-            // Fetch multiple pages sequentially (AutoTrader allows up to 50 per page)
+            let page = 1, hasMore = true, allATDeals: any[] = [];
             while (hasMore) {
                 try {
-                    const atRes = await fetch(`/api/deals?page=${page}`);
-                    const atData = await atRes.json();
-
-                    if (atData.ok && atData.deals) {
-                        allATDeals = [...allATDeals, ...atData.deals];
-                        if (allATDeals.length >= atData.totalResults || atData.deals.length < 50) {
-                            hasMore = false;
-                        } else {
-                            page++;
-                        }
-                    } else {
-                        hasMore = false;
-                    }
-                } catch (e) {
-                    console.error('AutoTrader pagination fetch error:', e);
-                    hasMore = false;
-                }
+                    const r = await fetch(`/api/deals?page=${page}`);
+                    const d = await r.json();
+                    if (d.ok && d.deals) {
+                        allATDeals = [...allATDeals, ...d.deals];
+                        if (allATDeals.length >= d.totalResults || d.deals.length < 50) hasMore = false;
+                        else page++;
+                    } else hasMore = false;
+                } catch { hasMore = false; }
             }
-
             if (allATDeals.length > 0) {
-                const mappedATDeals = allATDeals.map((d: any) => ({
-                    id: d.dealId,
-                    dealId: d.dealId,
-                    source: 'AutoTrader' as const,
-                    status: d.messages?.lastUpdated ? 'NEW_MESSAGE' : (d.advertiserDealStatus === 'In Progress' ? 'IN_PROGRESS' : 'NEW_LEAD'),
-                    advertiserDealStatus: d.advertiserDealStatus,
-                    created: d.created,
-                    lastUpdated: d.lastUpdated,
-                    customer: d.consumer,
-                    stock: d.stock,
-                    intentScore: d.buyingSignals?.dealIntentScore,
-                    intentLevel: d.buyingSignals?.intent,
-                    messagesId: d.messages?.messagesId ?? d.messages?.id
-                }));
-
-                // Merge, preferring auto trader deals from /deals to local DB representations if they overlap
-                const mappedATIds = new Set(mappedATDeals.map((d: any) => d.dealId));
-                const filteredLocal = allLeads.filter(l => !l.dealId || !mappedATIds.has(l.dealId));
-                allLeads = [...filteredLocal, ...mappedATDeals];
+                const mapped = allATDeals.map((d: any) => {
+                    let s: string;
+                    switch (d.advertiserDealStatus) {
+                        case 'In progress': case 'In Progress': s = 'IN_PROGRESS'; break;
+                        case 'Completed': s = 'WON'; break;
+                        case 'Cancelled': s = 'LOST'; break;
+                        default: s = 'NEW_LEAD';
+                    }
+                    return { id: d.dealId, dealId: d.dealId, source: 'AutoTrader' as const, status: s, advertiserDealStatus: d.advertiserDealStatus, created: d.created, lastUpdated: d.lastUpdated, customer: d.consumer, stock: d.stock, intentScore: d.buyingSignals?.dealIntentScore, intentLevel: d.buyingSignals?.intent, messagesId: d.messages?.id ?? null };
+                });
+                const ids = new Set(mapped.map((d: any) => d.dealId));
+                allLeads = [...allLeads.filter(l => !l.dealId || !ids.has(l.dealId)), ...mapped];
             }
-
-            allLeads.sort((a, b) => {
-                const dateA = new Date(a.lastUpdated || a.createdAt || a.created || 0).getTime();
-                const dateB = new Date(b.lastUpdated || b.createdAt || b.created || 0).getTime();
-                return dateB - dateA; // newest first
-            });
-
+            allLeads.sort((a, b) => new Date(b.lastUpdated || b.createdAt || b.created || 0).getTime() - new Date(a.lastUpdated || a.createdAt || a.created || 0).getTime());
             setLeads(allLeads);
-        } catch (err) {
-            console.error('Failed to fetch leads:', err);
-            toast.error('Failed to sync pipeline.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchCustomers = async () => {
-        setLoading(true);
-        try {
-            const res = await fetch('/api/crm/customers');
-            const data = await res.json();
-            if (data.ok) setCustomers(data.customers);
-        } catch (err) {
-            toast.error('Failed to load customers.');
-        } finally {
-            setLoading(false);
-        }
+        } catch { toast.error('Failed to sync pipeline.'); }
+        finally { setLoading(false); }
     };
 
     const openChat = async (lead: Lead) => {
         setSelectedLead(lead);
         setChatHistory([]);
-
-        if (lead.source === 'AutoTrader') {
-            if (lead.messagesId) {
-                setChatLoading(true);
-                try {
-                    const res = await fetch(`/api/crm/chat/autotrader/${lead.messagesId}`);
-                    const data = await res.json();
-                    if (data.ok) {
-                        setChatHistory(data.history || []);
-                        // Mark messages as read on AutoTrader's side
-                        fetch(`/api/crm/chat/autotrader/${lead.messagesId}`, { method: 'PATCH' }).catch(() => {});
-                    }
-                } catch (err) {
-                    toast.error('Failed to load chat history.');
-                } finally {
-                    setChatLoading(false);
+        if (lead.source === 'AutoTrader' && lead.messagesId) {
+            setChatLoading(true);
+            try {
+                const res = await fetch(`/api/crm/chat/autotrader/${lead.messagesId}`);
+                const data = await res.json();
+                if (data.ok) {
+                    setChatHistory(data.history || []);
+                    fetch(`/api/crm/chat/autotrader/${lead.messagesId}`, { method: 'PATCH' }).catch(() => {});
                 }
-            } else {
-                // Show empty state - no messages yet
-                setChatHistory([]);
-            }
+            } catch { toast.error('Failed to load chat history.'); }
+            finally { setChatLoading(false); }
         } else if (lead.message) {
-            setChatHistory([{
-                sender: 'customer',
-                text: lead.message,
-                timestamp: lead.createdAt || new Date().toISOString()
-            }]);
+            setChatHistory([{ sender: 'customer', text: lead.message, timestamp: lead.createdAt || new Date().toISOString() }]);
         }
     };
 
     const sendReply = async () => {
-        if (!newMessage || !selectedLead) return;
-
+        if (!newMessage.trim() || !selectedLead) return;
         if (selectedLead.source === 'AutoTrader') {
             try {
-                const res = await fetch(`/api/crm/chat/autotrader/${selectedLead.messagesId || 'new'}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: newMessage,
-                        dealId: selectedLead.dealId
-                    }),
-                });
-
+                const res = await fetch(`/api/crm/chat/autotrader/${selectedLead.messagesId || 'new'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: newMessage, dealId: selectedLead.dealId }) });
                 const data = await res.json();
-                if (data.ok) {
-                    setChatHistory(prev => [...prev, {
-                        sender: 'dealer',
-                        text: newMessage,
-                        timestamp: new Date().toISOString()
-                    }]);
-                    setNewMessage('');
-                    toast.success('Message sent!');
-                } else {
-                    toast.error(data.error || 'Failed to send message.');
-                }
-            } catch (err) {
-                toast.error('Connection error.');
-            }
+                if (data.ok) { setChatHistory(prev => [...prev, { sender: 'dealer', text: newMessage, timestamp: new Date().toISOString() }]); setNewMessage(''); toast.success('Message sent!'); }
+                else toast.error(data.error || 'Failed to send.');
+            } catch { toast.error('Connection error.'); }
         } else {
             setChatHistory(prev => [...prev, { sender: 'dealer', text: newMessage, timestamp: new Date().toISOString() }]);
             setNewMessage('');
@@ -331,64 +218,27 @@ function CRMContent() {
     const handleAcknowledge = async (e: React.MouseEvent, lead: Lead) => {
         e.stopPropagation();
         try {
-            const res = await fetch('/api/crm/leads', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: lead._id || lead.dealId, status: 'ACKNOWLEDGED' })
-            });
-            if (res.ok) {
-                toast.success('Lead acknowledged');
-                setLeads(prev => prev.map(l => (l._id === lead._id || l.dealId === lead.dealId) ? { ...l, status: 'ACKNOWLEDGED' } : l));
-            }
-        } catch (err) {
-            toast.error('Update failed');
-        }
+            await fetch('/api/crm/leads', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: lead._id || lead.dealId, status: 'ACKNOWLEDGED' }) });
+            toast.success('Lead acknowledged');
+            setLeads(prev => prev.map(l => (l._id === lead._id || l.dealId === lead.dealId) ? { ...l, status: 'ACKNOWLEDGED' } : l));
+        } catch { toast.error('Update failed'); }
     };
 
-    const handleCloseDeal = (e: React.MouseEvent, lead: Lead) => {
-        e.stopPropagation();
-        setCloseModalLead(lead);
-        setCancellationReason('Different Vehicle');
-    };
+    const handleCloseDeal = (e: React.MouseEvent, lead: Lead) => { e.stopPropagation(); setCloseModalLead(lead); };
 
     const submitCloseDeal = async () => {
         if (!closeModalLead) return;
         setIsClosingDeal(true);
         try {
             if (closeModalLead.source === 'AutoTrader' && closeModalLead.dealId) {
-                const res = await fetch(`/api/deals/${closeModalLead.dealId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        advertiserDealStatus: 'Cancelled',
-                        advertiserCancellationReason: cancellationReason
-                    })
-                });
-                if (res.ok) {
-                    toast.success('Deal Closed on AutoTrader');
-                    fetchLeads();
-                    setCloseModalLead(null);
-                } else {
-                    const data = await res.json();
-                    toast.error(data.error || 'Failed to close deal');
-                }
+                const res = await fetch(`/api/deals/${closeModalLead.dealId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ advertiserDealStatus: 'Cancelled', advertiserCancellationReason: cancellationReason }) });
+                if (res.ok) { toast.success('Deal closed'); fetchLeads(); setCloseModalLead(null); }
             } else if (closeModalLead._id) {
-                const res = await fetch('/api/crm/leads', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: closeModalLead._id, status: 'CLOSED' })
-                });
-                if (res.ok) {
-                    toast.success('Lead Closed internally');
-                    setLeads(prev => prev.map(l => l._id === closeModalLead._id ? { ...l, status: 'CLOSED' } : l));
-                    setCloseModalLead(null);
-                }
+                const res = await fetch('/api/crm/leads', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: closeModalLead._id, status: 'CLOSED' }) });
+                if (res.ok) { toast.success('Lead closed'); setLeads(prev => prev.map(l => l._id === closeModalLead._id ? { ...l, status: 'CLOSED' } : l)); setCloseModalLead(null); }
             }
-        } catch (err) {
-            toast.error('Connection error');
-        } finally {
-            setIsClosingDeal(false);
-        }
+        } catch { toast.error('Connection error'); }
+        finally { setIsClosingDeal(false); }
     };
 
     const submitCreateLead = async () => {
@@ -396,578 +246,648 @@ function CRMContent() {
         setIsCreatingLead(true);
         try {
             const [firstName, ...rest] = createLeadForm.name.trim().split(' ');
-            const res = await fetch('/api/crm/leads', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    customerDetails: {
-                        firstName,
-                        lastName: rest.join(' ') || '',
-                        email: createLeadForm.email,
-                        phone: createLeadForm.phone || createLeadForm.sms,
-                    },
-                    type: createLeadForm.leadType,
-                    preferredMethod: createLeadForm.preferredMethod,
-                    marketingConsent: createLeadForm.marketingConsent === 'Yes',
-                    avatarColor: createLeadForm.avatarColor,
-                    status: 'NEW_LEAD',
-                    platform: 'Manual',
-                }),
-            });
+            const res = await fetch('/api/crm/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customerDetails: { firstName, lastName: rest.join(' ') || '', email: createLeadForm.email, phone: createLeadForm.phone || createLeadForm.sms }, type: createLeadForm.leadType, preferredMethod: createLeadForm.preferredMethod, marketingConsent: createLeadForm.marketingConsent === 'Yes', status: 'NEW_LEAD', platform: 'Manual' }) });
             const data = await res.json();
-            if (!data.ok) throw new Error(data.error || 'Failed to create lead');
-            toast.success('Lead created');
-            setShowCreateLead(false);
-            setCreateLeadForm({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No', avatarColor: '#4D7CFF' });
+            if (!data.ok) throw new Error(data.error);
+            toast.success('Lead created'); setShowCreateLead(false);
+            setCreateLeadForm({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No', avatarColor: '#3eb6cd' });
             fetchLeads();
-        } catch (err: any) {
-            toast.error(err.message || 'Failed to create lead');
-        } finally {
-            setIsCreatingLead(false);
-        }
+        } catch (err: any) { toast.error(err.message || 'Failed'); }
+        finally { setIsCreatingLead(false); }
     };
 
     const submitAcknowledgeAll = async () => {
         setIsAcknowledgingAll(true);
         try {
-            const toAck = leads.filter(l => {
-                const s = (l.status || '').toUpperCase();
-                return s.includes('NEW_LEAD') || s.includes('NEW_MESSAGE') || s === 'NEW';
-            });
-            await Promise.all(toAck.map(lead =>
-                fetch('/api/crm/leads', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: lead._id || lead.dealId, status: 'ACKNOWLEDGED' }),
-                })
-            ));
-            toast.success(`${toAck.length} lead${toAck.length !== 1 ? 's' : ''} acknowledged`);
-            setShowAcknowledgeNew(false);
-            fetchLeads();
-        } catch (err) {
-            toast.error('Failed to acknowledge leads');
-        } finally {
-            setIsAcknowledgingAll(false);
-        }
+            const toAck = leads.filter(l => ['NEW_LEAD', 'NEW'].includes((l.status || '').toUpperCase()));
+            await Promise.all(toAck.map(l => fetch('/api/crm/leads', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: l._id || l.dealId, status: 'ACKNOWLEDGED' }) })));
+            toast.success(`${toAck.length} lead(s) acknowledged`); setShowAcknowledgeNew(false); fetchLeads();
+        } catch { toast.error('Failed'); }
+        finally { setIsAcknowledgingAll(false); }
     };
 
-    // Safely coerce status to string (guards against object values from DB)
-    const getStatusStr = (status: any): string => {
-        if (!status) return '';
-        if (typeof status === 'object') return status.name || status.value || '';
-        return String(status);
-    };
+    const getStatusStr = (s: any) => !s ? '' : typeof s === 'object' ? (s.name || s.value || '') : String(s);
 
-    const getStatusStyle = (status: any) => {
+    const getStatusBadge = (status: any) => {
         const s = getStatusStr(status).toUpperCase();
-        if (s.includes('NEW_MESSAGE')) return 'bg-emerald-500 text-white border-emerald-600';
-        if (s.includes('NEW')) return 'bg-emerald-400 text-white border-emerald-500';
-        if (s.includes('ACK') || s.includes('PROGRESS')) return 'bg-blue-500 text-white border-blue-600';
-        if (s.includes('CLOSED') || s.includes('CANCEL')) return 'bg-slate-200 text-slate-600 border-slate-300';
-        return 'bg-blue-500 text-white border-blue-600';
+        if (s === 'NEW_LEAD') return { label: 'New Lead', cls: 'bg-emerald-500 text-white' };
+        if (s === 'ACKNOWLEDGED') return { label: 'Acknowledged', cls: 'bg-[#3eb6cd] text-white' };
+        if (s === 'IN_PROGRESS') return { label: 'In Progress', cls: 'bg-blue-500 text-white' };
+        if (s === 'WON') return { label: 'Won', cls: 'bg-green-600 text-white' };
+        if (s === 'LOST' || s === 'CLOSED') return { label: s === 'LOST' ? 'Lost' : 'Closed', cls: 'bg-slate-300 text-slate-600' };
+        return { label: s.replace(/_/g, ' '), cls: 'bg-slate-200 text-slate-600' };
     };
 
-    const getTimeAgo = (dateStr?: string) => {
-        if (!dateStr) return 'unknown';
-        const ms = Date.now() - new Date(dateStr).getTime();
-        const hrs = Math.floor(ms / (1000 * 60 * 60));
-        if (hrs < 1) return 'just now';
-        if (hrs < 24) return `${hrs} hours ago`;
-        return `${Math.floor(hrs / 24)} days ago`;
+    const getTimeAgo = (d?: string) => {
+        if (!d) return '';
+        const ms = Date.now() - new Date(d).getTime();
+        const m = Math.floor(ms / 60000);
+        if (m < 1) return 'just now';
+        if (m < 60) return `${m} minutes ago`;
+        const h = Math.floor(m / 60);
+        if (h < 24) return `${h} hours ago`;
+        const days = Math.floor(h / 24);
+        if (days === 1) return 'Yesterday';
+        return `${days} days ago`;
     };
 
     const getCustomerInitials = (lead: Lead) => {
-        const c1 = lead.customerId as Customer;
-        if (c1?.firstName) return `${c1.firstName[0]}${c1.lastName?.[0] || ''}`.toUpperCase();
+        const c = lead.customerId as Customer;
+        if (c?.firstName) return `${c.firstName[0]}${c.lastName?.[0] || ''}`.toUpperCase();
         if (lead.customer?.firstName) return `${lead.customer.firstName[0]}${lead.customer.lastName?.[0] || ''}`.toUpperCase();
         if (lead.customer?.name) return lead.customer.name.substring(0, 2).toUpperCase();
         return '?';
     };
 
     const getCustomerName = (lead: Lead) => {
-        const c1 = lead.customerId as Customer;
-        if (c1?.firstName) return `${c1.firstName} ${c1.lastName || ''}`.trim();
+        const c = lead.customerId as Customer;
+        if (c?.firstName) return `${c.firstName} ${c.lastName || ''}`.trim();
         if (lead.customer?.firstName) return `${lead.customer.firstName} ${lead.customer.lastName || ''}`.trim();
         if (lead.customer?.name) return lead.customer.name;
         return 'Unknown Lead';
     };
 
-    const filteredLeads = useMemo(() => {
-        return leads.filter(l => {
-            if (filterChannel !== 'All' && l.source !== filterChannel) return false;
+    const getCustomerEmail = (lead: Lead) => {
+        const c = lead.customerId as Customer;
+        return c?.email || lead.customer?.email || '';
+    };
 
-            if (filterStatus !== 'All') {
-                const s = (l.status || '').toUpperCase();
-                if (filterStatus === 'New Lead' && !s.includes('NEW_LEAD')) return false;
-                if (filterStatus === 'New Message' && !s.includes('MESSAGE')) return false;
-                if (filterStatus === 'In Progress' && !s.includes('PROGRESS')) return false;
-                if (filterStatus === 'Closed' && !s.includes('CLOSE') && !s.includes('CANCEL')) return false;
-            }
+    const filteredLeads = useMemo(() => leads.filter(l => {
+        if (filterChannel !== 'All' && l.source !== filterChannel) return false;
+        if (filterStatus !== 'All') {
+            const s = (l.status || '').toUpperCase();
+            if (filterStatus === 'New Lead' && s !== 'NEW_LEAD') return false;
+            if (filterStatus === 'Acknowledged' && s !== 'ACKNOWLEDGED') return false;
+            if (filterStatus === 'In Progress' && s !== 'IN_PROGRESS') return false;
+            if (filterStatus === 'Won' && s !== 'WON') return false;
+            if (filterStatus === 'Lost' && s !== 'LOST') return false;
+            if (filterStatus === 'Closed' && s !== 'CLOSED') return false;
+        }
+        if (filterSearch) {
+            const q = filterSearch.toLowerCase();
+            const name = getCustomerName(l).toLowerCase();
+            const email = getCustomerEmail(l).toLowerCase();
+            if (!name.includes(q) && !email.includes(q)) return false;
+        }
+        if (filterUpdatedIn !== 'All Time') {
+            const ts = new Date(l.lastUpdated || l.createdAt || l.created || 0).getTime();
+            const now = Date.now();
+            if (filterUpdatedIn === 'Last 7 Days' && now - ts > 7 * 86400000) return false;
+            if (filterUpdatedIn === 'Last 30 Days' && now - ts > 30 * 86400000) return false;
+        }
+        return true;
+    }), [leads, filterChannel, filterStatus, filterSearch, filterUpdatedIn]);
 
-            if (filterType !== 'All') {
-                if (filterType === 'Enquiry' && !l.message && l.source !== 'AutoTrader') return false;
-                if (filterType === 'Callback' && !l.message?.toLowerCase().includes('call')) return false;
-            }
-
-            if (filterAssignedTo !== 'All') {
-                if (filterAssignedTo === 'Unassigned' && l.assignedTo) return false;
-            }
-
-            if (filterUpdatedIn !== 'All Time') {
-                const dateTs = new Date(l.lastUpdated || l.createdAt || l.created || 0).getTime();
-                const now = Date.now();
-                if (filterUpdatedIn === 'Last 7 Days' && now - dateTs > 7 * 24 * 60 * 60 * 1000) return false;
-                if (filterUpdatedIn === 'Last 30 Days' && now - dateTs > 30 * 24 * 60 * 60 * 1000) return false;
-            }
-
-            return true;
-        });
-    }, [leads, filterChannel, filterStatus, filterType, filterAssignedTo, filterUpdatedIn]);
+    const isClosed = selectedLead?.source === 'AutoTrader' && ['Completed', 'Cancelled'].includes(selectedLead?.advertiserDealStatus || '');
+    const noMessages = selectedLead?.source === 'AutoTrader' && !selectedLead?.messagesId;
+    const selectedBadge = selectedLead ? getStatusBadge(selectedLead.status) : null;
+    const selectedName = selectedLead ? getCustomerName(selectedLead) : '';
+    const selectedEmail = selectedLead ? getCustomerEmail(selectedLead) : '';
+    const selectedInitials = selectedLead ? getCustomerInitials(selectedLead) : '';
+    const selectedAvatarColor = selectedName !== 'Unknown Lead' && selectedName ? getAvatarColor(selectedName) : '#9ca3af';
 
     return (
-        <div className="w-full flex-1 min-h-[calc(100vh-60px)] lg:min-h-[calc(100vh-80px)] bg-slate-50 flex flex-col font-sans -mt-8 pt-8">
-            {/* Header */}
-            <div className="px-4 sm:px-8 pb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/60 bg-white">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Leads & Chat</h1>
-                </div>
-                <div className="flex gap-3">
-                    <button className="px-4 py-2 border border-slate-200 text-slate-500 text-sm font-semibold rounded-md hover:bg-slate-50 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Help
-                    </button>
-                    <button className="px-4 py-2 border border-slate-200 text-slate-500 text-sm font-semibold rounded-md hover:bg-slate-50 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        Settings
-                    </button>
-                </div>
-            </div>
+        <div className="w-full h-[calc(100vh-60px)] bg-white flex flex-col font-sans -mt-8 pt-8 overflow-hidden">
+            <div className="flex-1 flex overflow-hidden min-h-0">
 
-            <div className="flex-1 flex overflow-hidden">
-                {/* ─── Column 1: Leads List ───────────────────────────────────── */}
-                <div className="w-full lg:w-[450px] flex flex-col border-r border-slate-200/60 bg-white z-10 shrink-0">
-                    <div className="flex-1 overflow-y-auto scrollbar-hide">
-                        {loading ? (
-                            <div className="p-10 flex justify-center"><div className="w-8 h-8 border-4 border-slate-100 border-t-blue-500 rounded-full animate-spin"></div></div>
-                        ) : filteredLeads.length === 0 ? (
-                            <div className="p-10 text-center text-slate-500 text-sm">No leads match your filters.</div>
-                        ) : (
-                            <div className="divide-y divide-slate-100">
-                                {filteredLeads.map((lead) => {
-                                    const isSelected = selectedLead?.dealId === lead.dealId || (selectedLead?._id && selectedLead._id === lead._id);
-                                    let avatarColor = 'bg-slate-400';
-                                    if (lead.source === 'AutoTrader') avatarColor = 'bg-[#3eb6cd]'; // AT blue
-                                    if (getStatusStr(lead.status).includes('ACK')) avatarColor = 'bg-[#e49d44]'; // orange 
+                {/* ══ COL 1: Leads List ══ */}
+                <div className="w-[240px] flex flex-col border-r border-slate-200 shrink-0 min-h-0 bg-white">
+                    {/* Header */}
+                    <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
+                        <span className="font-bold text-slate-800 text-[14px]">Leads & Chat</span>
+                        <button
+                            onClick={() => setShowFilter(f => !f)}
+                            className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded border transition-colors ${showFilter ? 'bg-[#3eb6cd] text-white border-[#3eb6cd]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" /></svg>
+                            Filter
+                        </button>
+                    </div>
 
-                                    return (
-                                        <div
-                                            key={lead._id || lead.dealId || Math.random().toString()}
-                                            onClick={() => openChat(lead)}
-                                            className={`p-4 flex items-center justify-between cursor-pointer transition-colors border-l-4 ${isSelected ? 'bg-slate-50 border-blue-500' : 'border-transparent hover:bg-slate-50/50'
-                                                }`}
-                                        >
-                                            <div className="flex items-center gap-4 flex-1 min-w-0">
-                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 ${avatarColor}`}>
-                                                    {getCustomerInitials(lead)}
-                                                </div>
-                                                <div className="flex-1 min-w-0 pr-4">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${getStatusStyle(lead.status)}`}>
-                                                            {getStatusStr(lead.status).replace(/_/g, ' ')}
-                                                        </span>
-                                                        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                                                            <div className={`w-2 h-2 rounded-full ${getStatusStr(lead.status).includes('NEW') ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                                                            {getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}
-                                                        </div>
-                                                    </div>
-                                                    <h4 className="font-semibold text-slate-800 text-sm truncate">{getCustomerName(lead)}</h4>
-                                                    <p className="text-xs text-slate-500 italic mt-0.5 truncate">Enquiry</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-col gap-2 items-end shrink-0">
-                                                <select className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-600 focus:outline-none focus:border-blue-500 w-[100px]" onClick={e => e.stopPropagation()}>
-                                                    <option>Assign</option>
-                                                    <option>Me</option>
-                                                </select>
-                                                <div className="flex gap-1.5">
-                                                    <button onClick={(e) => handleAcknowledge(e, lead)} className="px-2 py-1 text-[10px] font-semibold text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors">Acknowledge</button>
-                                                    <button onClick={(e) => handleCloseDeal(e, lead)} className="px-2 py-1 text-[10px] font-semibold text-slate-500 border border-slate-200 rounded hover:bg-slate-50 transition-colors">Close</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )
-                                })}
+                    {showFilter ? (
+                        /* ── Filter Panel ── */
+                        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                            {[
+                                { label: 'Updated In', val: filterUpdatedIn, set: setFilterUpdatedIn, opts: ['Last 7 Days', 'Last 30 Days', 'All Time'] },
+                                { label: 'Type', val: filterType, set: setFilterType, opts: ['All', 'Enquiry', 'Callback', 'Chat', 'Walk-in', 'Test Drive', 'Finance', 'Deal Builder', 'Guaranteed Part Exchange'] },
+                                { label: 'Channel', val: filterChannel, set: setFilterChannel, opts: ['All', 'AutoTrader', 'Chat', 'Website', 'Email', 'SMS', 'Phone', 'WhatsApp', 'Facebook', 'Instagram', 'Manual'] },
+                                { label: 'Status', val: filterStatus, set: setFilterStatus, opts: ['All', 'New Lead', 'Acknowledged', 'In Progress', 'Won', 'Lost', 'Closed'] },
+                                { label: 'Assigned To', val: filterAssignedTo, set: setFilterAssignedTo, opts: ['All', 'Not Assigned', 'Me'] },
+                            ].map(f => (
+                                <div key={f.label}>
+                                    <label className="block text-[10px] font-semibold text-slate-500 mb-1">{f.label}</label>
+                                    <select value={f.val} onChange={e => f.set(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                        {f.opts.map(o => <option key={o}>{o}</option>)}
+                                    </select>
+                                </div>
+                            ))}
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Tags</label>
+                                <select className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                    <option>Nothing selected</option>
+                                </select>
                             </div>
-                        )}
-                    </div>
-                    {/* Bottom Action Bar */}
-                    <div className="p-4 border-t border-slate-200/60 flex items-center gap-3 bg-white">
-                        <button onClick={() => setShowCreateLead(true)} className="flex-1 py-2.5 bg-blue-500 text-white font-semibold text-sm rounded hover:bg-blue-600 transition-colors">Create New Lead</button>
-                        <button onClick={() => setShowAcknowledgeNew(true)} className="flex-1 py-2.5 bg-white border border-blue-200 text-blue-600 font-semibold text-sm rounded hover:bg-blue-50 transition-colors">Acknowledge New</button>
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Name, Email or Phone</label>
+                                <input type="text" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#3eb6cd]" />
+                            </div>
+                            <div className="flex items-center gap-1 pt-1 text-slate-400 text-[11px] justify-center">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                            </div>
+                        </div>
+                    ) : (
+                        /* ── Lead List ── */
+                        <div className="flex-1 overflow-y-auto">
+                            {loading ? (
+                                <div className="flex justify-center p-8"><div className="w-6 h-6 border-4 border-slate-100 border-t-[#3eb6cd] rounded-full animate-spin" /></div>
+                            ) : filteredLeads.length === 0 ? (
+                                <div className="p-6 text-center text-slate-400 text-[12px]">No leads found.</div>
+                            ) : (
+                                <div className="divide-y divide-slate-100">
+                                    {filteredLeads.map(lead => {
+                                        const isSelected = selectedLead?.dealId === lead.dealId || (selectedLead?._id && selectedLead._id === lead._id);
+                                        const name = getCustomerName(lead);
+                                        const initials = getCustomerInitials(lead);
+                                        const badge = getStatusBadge(lead.status);
+                                        const avatarColor = name === 'Unknown Lead' ? '#9ca3af' : getAvatarColor(name);
+                                        const isNew = (lead.status || '').toUpperCase().includes('NEW');
+
+                                        return (
+                                            <div
+                                                key={lead._id || lead.dealId}
+                                                onClick={() => openChat(lead)}
+                                                className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer border-l-[3px] transition-colors ${isSelected ? 'bg-slate-50 border-[#3eb6cd]' : 'border-transparent hover:bg-slate-50/60'}`}
+                                            >
+                                                <div style={{ backgroundColor: avatarColor }} className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-[12px] shrink-0 mt-0.5">
+                                                    {initials}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-semibold text-slate-800 text-[13px] truncate">{name === 'Unknown Lead' ? `Lead #${(lead._id || lead.dealId || '').slice(-3)}` : name}</div>
+                                                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                                        <span className="text-[10px] text-slate-400">{lead.platform || lead.source || 'Enquiry'}</span>
+                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.label.slice(0, 6)}{badge.label.length > 6 ? '...' : ''}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 mt-0.5">
+                                                        <div className={`w-1.5 h-1.5 rounded-full ${isNew ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                                        <span className="text-[10px] text-slate-400">{getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Bottom */}
+                    <div className="p-3 border-t border-slate-200 flex items-center gap-2 shrink-0">
+                        <button onClick={() => setShowCreateLead(true)} className="flex-1 py-2 bg-[#3eb6cd] text-white text-[12px] font-bold rounded-lg hover:bg-[#37a3b8] transition-colors">
+                            Create New Lead
+                        </button>
+                        <button title="Mute notifications" className="p-1.5 text-slate-400 hover:text-slate-600">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.536 8.464a5 5 0 010 7.072M12 6a7 7 0 010 14M12 6a7 7 0 000 14m0-14v14" /></svg>
+                        </button>
                     </div>
                 </div>
 
-                {/* ─── Column 2: Chat Area ───────────────────────────────────── */}
-                <div className="flex-1 flex flex-col bg-[#f8fafc] min-w-0 hidden lg:flex">
+                {/* ══ COL 2: Chat / Enquiry ══ */}
+                <div className="flex-1 flex flex-col border-r border-slate-200 min-w-0 min-h-0 bg-white">
                     {selectedLead ? (
                         <>
                             {/* Chat Header */}
-                            <div className="p-6 bg-white border-b border-slate-200/60 shadow-sm z-10 flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-14 h-14 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xl shadow-md ring-4 ring-slate-50">
-                                        {getCustomerInitials(selectedLead)}
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl font-bold text-slate-800">{getCustomerName(selectedLead)}</h2>
-                                        <div className="flex items-center gap-3 mt-1 text-sm font-medium text-slate-500">
-                                            <span className="flex items-center gap-1.5">
-                                                <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                {selectedLead.source}
-                                            </span>
-                                            {selectedLead.advertiserDealStatus && (
-                                                <>
-                                                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                                    <span>AT Status: {selectedLead.advertiserDealStatus}</span>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex gap-2">
-                                    <button className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                            <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
+                                <h2 className="text-[15px] font-bold text-slate-800">{selectedLead.platform || (selectedLead.source === 'AutoTrader' ? 'AutoTrader' : 'Enquiry')}</h2>
+                                <div className="flex items-center gap-2">
+                                    <button className="flex items-center gap-1.5 border border-[#3eb6cd] text-[#3eb6cd] text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-[#3eb6cd]/5 transition-colors">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                                        {selectedLead.source === 'AutoTrader' ? 'Chat' : 'Email'}
                                     </button>
-                                    <button className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                                    </button>
+                                    {selectedBadge && (
+                                        <button className={`text-[12px] font-semibold px-3 py-1.5 rounded-lg ${selectedBadge.cls}`}>
+                                            {selectedBadge.label}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
-                            {/* Chat Messages */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Message Area */}
+                            <div className="flex-1 overflow-y-auto min-h-0">
                                 {chatLoading ? (
-                                    <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div></div>
+                                    <div className="flex justify-center py-10"><div className="w-6 h-6 border-4 border-slate-200 border-t-[#3eb6cd] rounded-full animate-spin" /></div>
                                 ) : chatHistory.length === 0 ? (
-                                    <div className="text-center py-20">
-                                        <div className="inline-flex w-16 h-16 bg-white rounded-2xl items-center justify-center shadow-sm border border-slate-100 mb-4">
-                                            <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                                    <div className="flex flex-col items-center justify-center h-full text-center p-10">
+                                        <div className="w-12 h-12 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center mb-3">
+                                            <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                                         </div>
-                                        <p className="text-slate-500 font-medium">No messages yet. Send a reply to start the conversation.</p>
+                                        <p className="text-slate-400 text-[13px]">No messages yet.</p>
                                     </div>
-                                ) : (
-                                    chatHistory.map((msg, idx) => (
-                                        <div key={idx} className={`flex ${msg.sender === 'dealer' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[80%] flex flex-col ${msg.sender === 'dealer' ? 'items-end' : 'items-start'}`}>
-                                                <div className={`px-5 py-3.5 text-[15px] leading-relaxed shadow-sm ${msg.sender === 'dealer'
-                                                        ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
-                                                        : 'bg-white text-slate-800 rounded-2xl rounded-tl-sm border border-slate-200/60'
-                                                    }`}>
-                                                    {msg.text}
+                                ) : selectedLead.source === 'AutoTrader' ? (
+                                    /* AutoTrader: chat bubble style */
+                                    <>
+                                        {chatHistory.map((msg, idx) => (
+                                            <div key={idx} className={`flex p-4 gap-3 ${idx === 0 ? 'pt-5' : ''} ${msg.sender === 'dealer' ? 'justify-end' : 'justify-start'}`}>
+                                                {msg.sender === 'customer' && (
+                                                    <div style={{ backgroundColor: selectedAvatarColor }} className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[11px] shrink-0 mt-0.5">
+                                                        {selectedInitials}
+                                                    </div>
+                                                )}
+                                                <div className={`max-w-[75%] flex flex-col ${msg.sender === 'dealer' ? 'items-end' : 'items-start'}`}>
+                                                    <div className={`px-4 py-3 text-[13px] leading-relaxed rounded-2xl border bg-white text-slate-800 border-slate-200 ${msg.sender === 'dealer' ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+                                                        {msg.text}
+                                                    </div>
+                                                    <div className="flex items-center gap-1 mt-1">
+                                                        {msg.sender === 'dealer' && <svg className="w-3 h-3 text-[#3eb6cd]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
+                                                        <span className="text-[10px] text-slate-400">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                    </div>
                                                 </div>
-                                                <span className="text-[11px] font-semibold text-slate-400 mt-1.5 px-1 uppercase tracking-wider">
-                                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {msg.sender === 'dealer' ? 'You' : getCustomerName(selectedLead)}
-                                                </span>
                                             </div>
-                                        </div>
-                                    ))
+                                        ))}
+                                        <div ref={chatEndRef} />
+                                    </>
+                                ) : (
+                                    /* Email / Local: show as formatted email body */
+                                    <div className="p-5">
+                                        {chatHistory.map((msg, idx) => (
+                                            <div key={idx} className={`mb-5 ${msg.sender === 'dealer' ? 'pl-6 border-l-2 border-[#3eb6cd]/40' : ''}`}>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <div style={{ backgroundColor: msg.sender === 'dealer' ? '#3eb6cd' : selectedAvatarColor }} className="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0">
+                                                        {msg.sender === 'dealer' ? 'ME' : selectedInitials}
+                                                    </div>
+                                                    <span className="text-[11px] text-slate-400">{new Date(msg.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                                </div>
+                                                <div className="text-[13px] text-slate-800 leading-relaxed whitespace-pre-wrap pl-9">{msg.text}</div>
+                                            </div>
+                                        ))}
+                                        <div ref={chatEndRef} />
+                                    </div>
                                 )}
-                                <div ref={chatEndRef} />
                             </div>
 
-                            {/* Chat Input */}
-                            {selectedLead?.source === 'AutoTrader' && ['Completed', 'Cancelled'].includes(selectedLead?.advertiserDealStatus || '') ? (
-                                <div className="p-4 bg-slate-50 border-t border-slate-200/60 text-center text-sm text-slate-500">
-                                    This deal is <span className="font-medium">{selectedLead.advertiserDealStatus}</span> — messaging is disabled.
+                            {/* Input — always at bottom */}
+                            {isClosed ? (
+                                <div className="p-3 border-t border-slate-200 text-center text-[12px] text-slate-400 bg-slate-50">
+                                    Deal is {selectedLead.advertiserDealStatus} — messaging disabled.
                                 </div>
-                            ) : selectedLead?.source === 'AutoTrader' && !selectedLead?.messagesId ? (
-                                <div className="p-4 bg-slate-50 border-t border-slate-200/60 text-center text-sm text-slate-500">
-                                    Consumer has not started a conversation — messaging is unavailable for this enquiry.
+                            ) : noMessages ? (
+                                <div className="p-3 border-t border-slate-200 text-center text-[12px] text-slate-400 bg-slate-50">
+                                    Consumer has not started a conversation.
                                 </div>
                             ) : (
-                            <div className="p-4 bg-white border-t border-slate-200/60 shadow-[0_-4px_20px_-15px_rgba(0,0,0,0.1)] z-10">
-                                <div className="border border-slate-200 rounded-xl bg-slate-50 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-50 transition-all flex items-end">
-                                    <textarea
-                                        className="flex-1 max-h-32 min-h-[52px] bg-transparent border-none p-4 text-sm resize-none outline-none text-slate-800 placeholder:text-slate-400"
-                                        placeholder="Type a message... (Max 1500 chars)"
-                                        value={newMessage}
-                                        maxLength={1500}
-                                        onChange={(e) => setNewMessage(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                sendReply();
-                                            }
-                                        }}
-                                    />
-                                    <div className="p-2 shrink-0 flex items-center gap-2">
-                                        <span className="text-xs font-medium text-slate-400 px-2">{newMessage.length}/1500</span>
-                                        <button
-                                            onClick={sendReply}
-                                            disabled={!newMessage.trim()}
-                                            className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-md hover:bg-blue-700 disabled:bg-slate-300 disabled:shadow-none transition-all"
-                                        >
-                                            <svg className="w-5 h-5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                <div className="border-t border-slate-200 shrink-0">
+                                    {/* Action row */}
+                                    <div className="px-3 pt-2.5 pb-1.5 flex items-center justify-between">
+                                        <select className="text-[11px] border border-slate-200 rounded px-2 py-1 bg-white text-slate-500 focus:outline-none">
+                                            <option>Assign</option><option>Me</option>
+                                        </select>
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="relative">
+                                                <button onClick={() => { setShowQuickInsert(v => !v); setShowActions(false); }} className="flex items-center gap-0.5 border border-slate-200 text-slate-500 text-[11px] font-semibold px-2.5 py-1 rounded hover:bg-slate-50">
+                                                    Quick Insert <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                </button>
+                                                {showQuickInsert && (
+                                                    <div className="absolute bottom-full right-0 mb-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-30">
+                                                        {QUICK_INSERTS.map((t, i) => (
+                                                            <button key={i} onClick={() => { setNewMessage(t); setShowQuickInsert(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-slate-700 hover:bg-slate-50 border-b border-slate-50 last:border-0">{t}</button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="relative">
+                                                <button onClick={() => { setShowActions(v => !v); setShowQuickInsert(false); }} className="flex items-center gap-0.5 border border-slate-200 text-slate-500 text-[11px] font-semibold px-2.5 py-1 rounded hover:bg-slate-50">
+                                                    Actions <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                </button>
+                                                {showActions && (
+                                                    <div className="absolute bottom-full right-0 mb-1 w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-30">
+                                                        <button onClick={(e) => { handleAcknowledge(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-slate-700 hover:bg-slate-50 border-b border-slate-50">Acknowledge</button>
+                                                        <button onClick={(e) => { handleCloseDeal(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-red-500 hover:bg-red-50">Close Lead</button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {/* Textarea */}
+                                    <div className="px-3 pb-1">
+                                        <textarea rows={4} value={newMessage} maxLength={1500} onChange={e => setNewMessage(e.target.value)}
+                                            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
+                                            placeholder="Type a message…"
+                                            className="w-full border border-slate-200 rounded-lg p-3 text-[13px] resize-none outline-none text-slate-800 placeholder:text-slate-300 focus:border-[#3eb6cd] focus:ring-1 focus:ring-[#3eb6cd]/20"
+                                        />
+                                    </div>
+                                    {/* Send row */}
+                                    <div className="px-3 pb-3 flex items-center gap-2 flex-wrap">
+                                        <button onClick={sendReply} disabled={!newMessage.trim()} className="px-4 py-1.5 bg-[#3eb6cd] text-white font-bold text-[13px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-40 transition-colors">Send</button>
+                                        <button title="Attach link" className="p-1.5 border border-slate-200 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-50">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                                         </button>
+                                        <span className="text-[11px] text-slate-400">via</span>
+                                        <select value={sendVia} onChange={e => setSendVia(e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-[11px] text-slate-600 focus:outline-none focus:border-[#3eb6cd] bg-white">
+                                            <option>Email Templ</option>
+                                            <option>Chat</option>
+                                            <option>SMS</option>
+                                            <option>WhatsApp</option>
+                                        </select>
+                                        <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer">
+                                            <input type="checkbox" checked={includeThread} onChange={e => setIncludeThread(e.target.checked)} className="rounded border-slate-300 text-[#3eb6cd]" />
+                                            Include Thread
+                                        </label>
+                                        <button className="ml-auto border border-slate-200 text-slate-600 text-[11px] font-semibold px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Preview</button>
                                     </div>
                                 </div>
-                            </div>
                             )}
                         </>
                     ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center">
-                            <div className="w-20 h-20 bg-white shadow-sm border border-slate-200 rounded-full flex items-center justify-center mb-6">
-                                <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-10">
+                            <div className="w-14 h-14 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center mb-3">
+                                <svg className="w-7 h-7 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                             </div>
-                            <h3 className="text-xl font-bold text-slate-700 mb-2">Select a conversation</h3>
-                            <p className="max-w-xs text-sm">Choose a lead from the pipeline on the left to view the chat history and reply.</p>
+                            <h3 className="text-[14px] font-bold text-slate-700 mb-1">Select a conversation</h3>
+                            <p className="text-[12px] text-slate-400">Choose a lead from the list to view messages.</p>
                         </div>
                     )}
                 </div>
 
-                {/* ─── Column 3: Filters Sidebar ──────────────────────────────── */}
-                <div className="w-[300px] border-l border-slate-200/60 bg-white p-6 shrink-0 overflow-y-auto hidden xl:flex xl:flex-col">
-                    <h3 className="font-bold text-slate-800 tracking-tight mb-6">Filters</h3>
+                {/* ══ COL 3: Visitor Panel ══ */}
+                <div className="w-[280px] flex flex-col border-r border-slate-200 shrink-0 overflow-y-auto min-h-0 bg-white hidden lg:flex">
+                    {selectedLead ? (
+                        <>
+                            {/* Visitor */}
+                            <div className="p-4 border-b border-slate-200">
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="font-bold text-slate-800 text-[14px]">Visitor</span>
+                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                        Edit
+                                    </button>
+                                </div>
+                                {/* Avatar centered */}
+                                <div className="flex flex-col items-center mb-4">
+                                    <div style={{ backgroundColor: selectedAvatarColor }} className="w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg mb-2">
+                                        {selectedInitials}
+                                    </div>
+                                    <p className="font-semibold text-slate-800 text-[14px]">{selectedName === 'Unknown Lead' ? 'Name Unknown' : selectedName}</p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">{selectedLead.platform || selectedLead.source || 'Email'}</p>
+                                </div>
+                                <div className="space-y-2">
+                                    {selectedEmail && (
+                                        <div className="flex items-start gap-3 text-[12px]">
+                                            <span className="text-slate-400 w-12 shrink-0 pt-px">Email:</span>
+                                            <a href={`mailto:${selectedEmail}`} className="text-[#3eb6cd] hover:underline break-all leading-snug">{selectedEmail}</a>
+                                        </div>
+                                    )}
+                                    {(() => { const c = selectedLead.customerId as Customer; const phone = c?.phone || selectedLead.customer?.phone; return phone ? (
+                                        <div className="flex items-center gap-3 text-[12px]">
+                                            <span className="text-slate-400 w-12 shrink-0">Phone:</span>
+                                            <a href={`tel:${phone}`} className="text-[#3eb6cd] hover:underline">{phone}</a>
+                                        </div>
+                                    ) : null; })()}
+                                    <div className="flex items-center gap-3 text-[12px]">
+                                        <span className="text-slate-400 w-12 shrink-0">Source:</span>
+                                        <span className="text-slate-700">{selectedLead.source}</span>
+                                    </div>
+                                </div>
+                            </div>
 
-                    <div className="space-y-6">
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-2">Updated In</label>
-                            <select
-                                value={filterUpdatedIn}
-                                onChange={e => setFilterUpdatedIn(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                                <option>Last 7 Days</option>
-                                <option>Last 30 Days</option>
-                                <option>All Time</option>
+                            {/* Link Contact */}
+                            <div className="p-4 border-b border-slate-200">
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="font-bold text-slate-800 text-[14px]">Link Contact</span>
+                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                                        View
+                                    </button>
+                                </div>
+                                {selectedEmail ? (
+                                    /* Matched contact card */
+                                    <div>
+                                        <p className="text-[11px] text-slate-500 mb-3">The following contact profile matches this visitor's email address:</p>
+                                        <div className="flex items-start gap-3 mb-4">
+                                            <div style={{ backgroundColor: selectedAvatarColor }} className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-[12px] shrink-0">
+                                                {selectedInitials}
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold text-slate-800 text-[13px]">{selectedName === 'Unknown Lead' ? 'Name Unknown' : selectedName}</p>
+                                                {selectedEmail && <p className="text-[11px] text-slate-400 mt-0.5 break-all">{selectedEmail}</p>}
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={async () => {
+                                                setIsCreatingContact(true);
+                                                try {
+                                                    const [firstName, ...rest] = (selectedName === 'Unknown Lead' ? 'Unknown' : selectedName).split(' ');
+                                                    const res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firstName, lastName: rest.join(' ') || '', email: selectedEmail, source: selectedLead.source, status: 'Active' }) });
+                                                    const data = await res.json();
+                                                    if (data.ok) toast.success('Contact linked!');
+                                                    else toast.error(data.error || 'Failed');
+                                                } catch { toast.error('Connection error'); }
+                                                finally { setIsCreatingContact(false); }
+                                            }} disabled={isCreatingContact} className="flex-1 py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-50 transition-colors flex items-center justify-center">
+                                                {isCreatingContact ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Link Contact'}
+                                            </button>
+                                            <button className="flex-1 py-2 bg-slate-600 text-white font-bold text-[12px] rounded-lg hover:bg-slate-700 transition-colors">
+                                                Ignore
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* No match — create new */
+                                    <div className="text-center py-3">
+                                        <p className="text-[12px] text-slate-500 mb-3">Would you like to create a customer profile for this visitor?</p>
+                                        <button onClick={async () => {
+                                            setIsCreatingContact(true);
+                                            try {
+                                                const [firstName, ...rest] = (selectedName === 'Unknown Lead' ? 'Unknown' : selectedName).split(' ');
+                                                const res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firstName, lastName: rest.join(' ') || '', email: selectedEmail, source: selectedLead.source, status: 'Active' }) });
+                                                const data = await res.json();
+                                                if (data.ok) toast.success('Contact created!');
+                                                else toast.error(data.error || 'Failed');
+                                            } catch { toast.error('Connection error'); }
+                                            finally { setIsCreatingContact(false); }
+                                        }} disabled={isCreatingContact} className="w-full py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-50 transition-colors flex items-center justify-center">
+                                            {isCreatingContact ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Create Contact'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Vehicles of Interest */}
+                            <div className="p-4 border-b border-slate-200">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="font-bold text-slate-800 text-[14px]">Vehicles of Interest</span>
+                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                        Edit
+                                    </button>
+                                </div>
+                                {selectedLead.stock ? (
+                                    <div className="text-[12px] text-slate-700">
+                                        <p className="font-semibold">{selectedLead.stock.make} {selectedLead.stock.model}</p>
+                                        {selectedLead.stock.vrm && <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">{selectedLead.stock.vrm}</span>}
+                                    </div>
+                                ) : (
+                                    <p className="text-[12px] text-slate-400 italic">No vehicles.</p>
+                                )}
+                            </div>
+
+                            {/* Tags */}
+                            <div className="p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="font-bold text-slate-800 text-[14px]">Tags</span>
+                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                        Edit
+                                    </button>
+                                </div>
+                                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] text-slate-400 focus:outline-none focus:border-[#3eb6cd] bg-white">
+                                    <option>Select Tags</option>
+                                </select>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex-1 flex items-center justify-center p-6 text-center">
+                            <p className="text-[12px] text-slate-300">Select a lead to view visitor details.</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* ══ COL 4: Appointments + Notes ══ */}
+                <div className="w-[240px] flex flex-col shrink-0 overflow-y-auto min-h-0 bg-white hidden xl:flex">
+                    {/* Appointments */}
+                    <div className="p-4 border-b border-slate-200">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="font-bold text-slate-800 text-[14px]">Appointments</span>
+                            <select value={appointmentReminder} onChange={e => setAppointmentReminder(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none text-slate-500">
+                                <option>Reminder</option>
+                                <option>No Reminder</option>
                             </select>
                         </div>
-
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-2">Type</label>
-                            <select
-                                value={filterType}
-                                onChange={e => setFilterType(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                                <option>All</option>
-                                <option>Enquiry</option>
-                                <option>Callback</option>
-                            </select>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Type</label>
+                                <select value={appointmentType} onChange={e => setAppointmentType(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                    <option>Appointment</option>
+                                    <option>Test Drive</option>
+                                    <option>Viewing</option>
+                                    <option>Callback</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-[10px] font-semibold text-slate-500">Calendar</label>
+                                    <button className="text-[10px] text-[#3eb6cd] border border-[#3eb6cd]/30 px-1.5 py-0.5 rounded hover:bg-[#3eb6cd]/5 flex items-center gap-0.5">
+                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                        Manage
+                                    </button>
+                                </div>
+                                <select className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                    <option>Primary Calendar</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Date & Time</label>
+                                <div className="flex gap-1">
+                                    <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#3eb6cd] min-w-0" />
+                                    <input type="time" value={appointmentTime} onChange={e => setAppointmentTime(e.target.value)} className="w-[72px] border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#3eb6cd]" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Purpose</label>
+                                <input type="text" value={appointmentPurpose} onChange={e => setAppointmentPurpose(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] focus:outline-none focus:border-[#3eb6cd]" />
+                            </div>
+                            <button className="flex items-center gap-1 text-[#3eb6cd] text-[11px] font-semibold hover:underline">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                Appointment Options
+                            </button>
+                            <button className="w-full py-2 bg-[#4D7CFF] text-white font-bold text-[12px] rounded-lg hover:bg-blue-600 transition-colors">
+                                Add Appointment
+                            </button>
                         </div>
+                    </div>
 
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-2">Channel</label>
-                            <select
-                                value={filterChannel}
-                                onChange={e => setFilterChannel(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                                <option>All</option>
-                                <option>AutoTrader</option>
-                                <option>Website</option>
-                                <option>Manual</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-2">Status</label>
-                            <select
-                                value={filterStatus}
-                                onChange={e => setFilterStatus(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                                <option>All</option>
-                                <option>New Lead</option>
-                                <option>New Message</option>
-                                <option>In Progress</option>
-                                <option>Closed</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-2">Assigned To</label>
-                            <select
-                                value={filterAssignedTo}
-                                onChange={e => setFilterAssignedTo(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                                <option>All</option>
-                                <option>Unassigned</option>
-                                <option>Me</option>
-                            </select>
-                        </div>
+                    {/* Notes */}
+                    <div className="p-4 flex-1 flex flex-col">
+                        <span className="font-bold text-slate-800 text-[14px] mb-3 block">Notes</span>
+                        <textarea
+                            value={noteText}
+                            onChange={e => setNoteText(e.target.value)}
+                            placeholder="Add a note…"
+                            className="flex-1 border border-slate-200 rounded-lg p-3 text-[12px] resize-none focus:outline-none focus:border-[#3eb6cd] text-slate-700 placeholder:text-slate-300 min-h-[80px]"
+                        />
+                        <button className="mt-2 w-full py-2 border border-slate-200 text-slate-600 font-semibold text-[12px] rounded-lg hover:bg-slate-50 transition-colors">
+                            Add Note
+                        </button>
                     </div>
                 </div>
             </div>
 
-            {/* Close Deal Modal */}
+            {/* ── Close Deal Modal ── */}
             {closeModalLead && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-xl w-[400px] p-6 animate-in fade-in zoom-in duration-200">
-                        <h2 className="text-xl font-bold text-slate-800 mb-2">Close Deal</h2>
-                        <p className="text-sm text-slate-500 mb-6">Please select the reason for closing this lead. This will be synced.</p>
-
-                        <label className="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Cancellation Reason</label>
-                        <select
-                            value={cancellationReason}
-                            onChange={(e) => setCancellationReason(e.target.value)}
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mb-8 text-sm"
-                        >
-                            <option value="Different Vehicle">Different Vehicle</option>
-                            <option value="Unaffordable">Unaffordable</option>
-                            <option value="Not Interested">Not Interested</option>
-                            <option value="Went Elsewhere">Went Elsewhere</option>
-                            <option value="Not Available">Not Available</option>
-                            <option value="Condition">Condition</option>
-                            <option value="Poor Customer Service">Poor Customer Service</option>
-                            <option value="Other">Other</option>
+                    <div className="bg-white rounded-xl shadow-xl w-[400px] p-6">
+                        <h2 className="text-[15px] font-bold text-slate-800 mb-2">Close Lead</h2>
+                        <p className="text-[12px] text-slate-500 mb-5">Select a reason for closing this lead.</p>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">Reason</label>
+                        <select value={cancellationReason} onChange={e => setCancellationReason(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] mb-6 focus:outline-none">
+                            {['Different Vehicle', 'Unaffordable', 'Not Interested', 'Went Elsewhere', 'Not Available', 'Condition', 'Poor Customer Service', 'Other'].map(r => <option key={r}>{r}</option>)}
                         </select>
-
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setCloseModalLead(null)}
-                                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
-                                disabled={isClosingDeal}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitCloseDeal}
-                                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg flex items-center justify-center min-w-[100px]"
-                                disabled={isClosingDeal}
-                            >
-                                {isClosingDeal ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : 'Close Deal'}
+                        <div className="flex justify-end gap-2">
+                            <button onClick={() => setCloseModalLead(null)} className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button onClick={submitCloseDeal} disabled={isClosingDeal} className="px-4 py-2 text-[13px] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg min-w-[90px] flex items-center justify-center">
+                                {isClosingDeal ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Close'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Create New Lead Modal */}
+            {/* ── Create New Lead Modal ── */}
             {showCreateLead && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-xl w-[480px] max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
-                        <div className="px-6 py-5 border-b border-slate-100">
+                    <div className="bg-white rounded-xl shadow-xl w-[460px] max-h-[90vh] overflow-y-auto">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                             <h2 className="text-[15px] font-bold text-slate-800">Create New Lead</h2>
+                            <button onClick={() => setShowCreateLead(false)} className="text-slate-400 hover:text-slate-600"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
                         </div>
                         <div className="px-6 py-5 space-y-4">
-                            {/* Lead Type */}
+                            {[
+                                { label: 'Lead Type', type: 'select', val: createLeadForm.leadType, key: 'leadType', opts: ['Enquiry', 'Callback', 'Walk-in', 'Chat', 'Test Drive', 'Other'] },
+                            ].map(f => (
+                                <div key={f.label}>
+                                    <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">{f.label}</label>
+                                    <select value={f.val} onChange={e => setCreateLeadForm(p => ({ ...p, [f.key]: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]">
+                                        {f.opts.map(o => <option key={o}>{o}</option>)}
+                                    </select>
+                                </div>
+                            ))}
+                            {[
+                                { label: 'Name', key: 'name', type: 'text', ph: 'Full name' },
+                                { label: 'Email', key: 'email', type: 'email', ph: 'email@example.com' },
+                                { label: 'Phone', key: 'phone', type: 'tel', ph: 'Phone number' },
+                                { label: 'SMS', key: 'sms', type: 'tel', ph: 'SMS number' },
+                            ].map(f => (
+                                <div key={f.label}>
+                                    <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">{f.label}</label>
+                                    <input type={f.type} placeholder={f.ph} value={(createLeadForm as any)[f.key]} onChange={e => setCreateLeadForm(p => ({ ...p, [f.key]: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]" />
+                                </div>
+                            ))}
                             <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Lead Type</label>
-                                <select
-                                    value={createLeadForm.leadType}
-                                    onChange={e => setCreateLeadForm(p => ({ ...p, leadType: e.target.value }))}
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                >
-                                    <option>Enquiry</option>
-                                    <option>Callback</option>
-                                    <option>Walk-in</option>
-                                    <option>Other</option>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">Preferred Method</label>
+                                <select value={createLeadForm.preferredMethod} onChange={e => setCreateLeadForm(p => ({ ...p, preferredMethod: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]">
+                                    <option>Email</option><option>Phone</option><option>SMS</option>
                                 </select>
                             </div>
-                            {/* Name */}
                             <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Name</label>
-                                <input
-                                    type="text"
-                                    placeholder="Full name"
-                                    value={createLeadForm.name}
-                                    onChange={e => setCreateLeadForm(p => ({ ...p, name: e.target.value }))}
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                />
-                            </div>
-                            {/* Email */}
-                            <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Email</label>
-                                <input
-                                    type="email"
-                                    placeholder="email@example.com"
-                                    value={createLeadForm.email}
-                                    onChange={e => setCreateLeadForm(p => ({ ...p, email: e.target.value }))}
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                />
-                            </div>
-                            {/* SMS + Phone */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">SMS</label>
-                                    <input
-                                        type="tel"
-                                        placeholder="SMS number"
-                                        value={createLeadForm.sms}
-                                        onChange={e => setCreateLeadForm(p => ({ ...p, sms: e.target.value }))}
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Phone</label>
-                                    <input
-                                        type="tel"
-                                        placeholder="Phone number"
-                                        value={createLeadForm.phone}
-                                        onChange={e => setCreateLeadForm(p => ({ ...p, phone: e.target.value }))}
-                                        className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                    />
-                                </div>
-                            </div>
-                            {/* Preferred Method */}
-                            <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Preferred Method</label>
-                                <select
-                                    value={createLeadForm.preferredMethod}
-                                    onChange={e => setCreateLeadForm(p => ({ ...p, preferredMethod: e.target.value }))}
-                                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-[13px] focus:outline-none focus:border-blue-400"
-                                >
-                                    <option>Email</option>
-                                    <option>Email Template</option>
-                                    <option>SMS</option>
-                                </select>
-                            </div>
-                            {/* Marketing Consent */}
-                            <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Marketing Consent</label>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">Marketing Consent</label>
                                 <div className="flex gap-2">
-                                    {['No', 'Yes'].map(opt => (
-                                        <button
-                                            key={opt}
-                                            type="button"
-                                            onClick={() => setCreateLeadForm(p => ({ ...p, marketingConsent: opt }))}
-                                            className={`flex-1 py-2 text-[13px] font-semibold rounded-lg border transition-colors ${createLeadForm.marketingConsent === opt ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                                        >
-                                            {opt}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            {/* Avatar Color */}
-                            <div>
-                                <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Avatar</label>
-                                <div className="flex gap-2">
-                                    {['#4D7CFF', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22'].map(color => (
-                                        <button
-                                            key={color}
-                                            type="button"
-                                            onClick={() => setCreateLeadForm(p => ({ ...p, avatarColor: color }))}
-                                            style={{ backgroundColor: color }}
-                                            className={`w-8 h-8 rounded-full transition-transform ${createLeadForm.avatarColor === color ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : 'hover:scale-105'}`}
-                                        />
-                                    ))}
+                                    {['No', 'Yes'].map(o => <button key={o} type="button" onClick={() => setCreateLeadForm(p => ({ ...p, marketingConsent: o }))} className={`flex-1 py-2 text-[12px] font-semibold rounded-lg border transition-colors ${createLeadForm.marketingConsent === o ? 'bg-[#3eb6cd] text-white border-[#3eb6cd]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{o}</button>)}
                                 </div>
                             </div>
                         </div>
-                        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowCreateLead(false)}
-                                disabled={isCreatingLead}
-                                className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitCreateLead}
-                                disabled={isCreatingLead}
-                                className="px-5 py-2 text-[13px] font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg flex items-center gap-2 min-w-[110px] justify-center"
-                            >
+                        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+                            <button onClick={() => setShowCreateLead(false)} className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button onClick={submitCreateLead} disabled={isCreatingLead} className="px-5 py-2 text-[13px] font-semibold text-white bg-[#3eb6cd] hover:bg-[#37a3b8] rounded-lg min-w-[110px] flex items-center justify-center">
                                 {isCreatingLead ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Create Lead'}
                             </button>
                         </div>
@@ -975,27 +895,15 @@ function CRMContent() {
                 </div>
             )}
 
-            {/* Acknowledge New Modal */}
+            {/* ── Acknowledge New Modal ── */}
             {showAcknowledgeNew && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-xl w-[400px] p-6 animate-in fade-in zoom-in duration-200">
-                        <h2 className="text-[15px] font-bold text-slate-800 mb-3">Confirm Acknowledge</h2>
-                        <p className="text-[13px] text-slate-500 mb-6">
-                            Please confirm you would like to acknowledge all leads with a &lsquo;New Lead&rsquo; or &lsquo;New Message&rsquo; status?
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowAcknowledgeNew(false)}
-                                disabled={isAcknowledgingAll}
-                                className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitAcknowledgeAll}
-                                disabled={isAcknowledgingAll}
-                                className="px-5 py-2 text-[13px] font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg flex items-center gap-2 min-w-[160px] justify-center"
-                            >
+                    <div className="bg-white rounded-xl shadow-xl w-[380px] p-6">
+                        <h2 className="text-[15px] font-bold text-slate-800 mb-2">Confirm Acknowledge</h2>
+                        <p className="text-[13px] text-slate-500 mb-6">Acknowledge all leads with a &lsquo;New Lead&rsquo; status?</p>
+                        <div className="flex justify-end gap-2">
+                            <button onClick={() => setShowAcknowledgeNew(false)} className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button onClick={submitAcknowledgeAll} disabled={isAcknowledgingAll} className="px-5 py-2 text-[13px] font-semibold text-white bg-[#3eb6cd] rounded-lg min-w-[150px] flex items-center justify-center">
                                 {isAcknowledgingAll ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Confirm Acknowledge'}
                             </button>
                         </div>
@@ -1004,8 +912,9 @@ function CRMContent() {
             )}
 
             <style jsx>{`
-                .scrollbar-hide::-webkit-scrollbar { display: none; }
-                .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+                ::-webkit-scrollbar { width: 4px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
             `}</style>
         </div>
     );
@@ -1013,7 +922,7 @@ function CRMContent() {
 
 export default function CRMPage() {
     return (
-        <Suspense fallback={<div className="p-20 text-center font-bold text-slate-400">Loading Pipeline...</div>}>
+        <Suspense fallback={<div className="p-20 text-center text-slate-400 font-semibold">Loading…</div>}>
             <CRMContent />
         </Suspense>
     );

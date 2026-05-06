@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Appointment from '@/models/Appointment';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -35,7 +35,7 @@ async function patchAppointment(req: NextRequest, context: Ctx) {
     const appt = await Appointment.findOneAndUpdate(
         { _id: apptId, vehicleId: new mongoose.Types.ObjectId(id), tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: update },
-        { new: true }
+        { returnDocument: 'after' }
     );
     if (!appt) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, appointment: appt });

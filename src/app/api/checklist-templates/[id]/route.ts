@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import ChecklistTemplate from '@/models/ChecklistTemplate';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -48,7 +48,7 @@ async function patchHandler(req: NextRequest, { params }: { params: Promise<{ id
     const updated = await ChecklistTemplate.findOneAndUpdate(
         { _id: id, tenantId },
         { $set: update },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean() as any;
 
     if (!updated) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });

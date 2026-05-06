@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Lead from '@/models/Lead';
 import Customer from '@/models/Customer';
@@ -93,7 +93,7 @@ export async function PATCH(request: Request) {
         const lead = await Lead.findOneAndUpdate(
             query,
             { status },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!lead) {
@@ -136,3 +136,4 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 }
+

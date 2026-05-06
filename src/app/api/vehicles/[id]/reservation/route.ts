@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Reservation from '@/models/Reservation';
 import Vehicle from '@/models/Vehicle';
@@ -95,7 +95,7 @@ async function cancelReservation(req: NextRequest, context: Ctx) {
     const reservation = await Reservation.findOneAndUpdate(
         { vehicleId: new mongoose.Types.ObjectId(id), tenantId: new mongoose.Types.ObjectId(tenantId), status: 'active' },
         { $set: { status: 'cancelled', cancelType: body.cancelType || 'without_credit', cancelledAt: new Date() } },
-        { new: true }
+        { returnDocument: 'after' }
     );
 
     if (!reservation) {

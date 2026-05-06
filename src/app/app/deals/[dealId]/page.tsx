@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
+import FinanceTab from '@/components/deals/FinanceTab';
 
 interface Message {
-    author: string;
-    body: string;
-    createdAt: string;
-    type?: string;
+    from: 'Consumer' | 'Advertiser';
+    at: string;
+    message: string;
 }
 
 interface Deal {
@@ -55,6 +55,7 @@ type Tab = 'deal' | 'finance' | 'confirm' | 'share';
 
 export default function DealDetailPage() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const dealId = params.dealId as string;
 
     const [deal, setDeal] = useState<Deal | null>(null);
@@ -63,7 +64,11 @@ export default function DealDetailPage() {
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [replyText, setReplyText] = useState('');
     const [sending, setSending] = useState(false);
-    const [activeTab, setActiveTab] = useState<Tab>('deal');
+    // Read ?tab= query param so "Create & Finance / Confirm / Share" buttons land on the right tab
+    const initialTab = (['deal', 'finance', 'confirm', 'share'].includes(searchParams.get('tab') ?? '')
+        ? (searchParams.get('tab') as Tab)
+        : 'deal');
+    const [activeTab, setActiveTab] = useState<Tab>(initialTab);
     const [toastMsg, setToastMsg] = useState('');
     const [toastType, setToastType] = useState<'success' | 'error'>('success');
     const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -89,12 +94,12 @@ export default function DealDetailPage() {
     }, [dealId]);
 
     const getMessagesId = useCallback(() => {
-        return (deal as any)?.messages?.messagesId ?? (deal as any)?.messages?.id ?? null;
+        return deal?.messages?.id ?? null;
     }, [deal]);
 
     const fetchMessages = useCallback(async () => {
         setLoadingMessages(true);
-        const messagesId = (deal as any)?.messages?.messagesId ?? (deal as any)?.messages?.id;
+        const messagesId = deal?.messages?.id;
         try {
             const url = messagesId
                 ? `/api/deals/${dealId}/messages?messagesId=${messagesId}`
@@ -102,7 +107,7 @@ export default function DealDetailPage() {
             const res = await fetch(url);
             const data = await res.json();
             if (data.ok) {
-                const msgs = data.messages?.messages || data.messages?.results || [];
+                const msgs = data.messages?.messages || [];
                 setMessages(msgs);
                 if (messagesId) {
                     await fetch(`/api/deals/${dealId}/messages?messagesId=${messagesId}`, { method: 'PATCH' });
@@ -178,7 +183,7 @@ export default function DealDetailPage() {
     );
 
     const totalPrice = deal.price?.totalPrice?.amountGBP || deal.price?.suppliedPrice?.amountGBP || 0;
-    const isActive = deal.advertiserDealStatus === 'In Progress';
+    const isActive = deal.advertiserDealStatus === 'In Progress' || deal.advertiserDealStatus === 'In progress';
     const isCompleted =
         deal.advertiserDealStatus === 'Complete' || deal.advertiserDealStatus === 'Completed';
     const isCancelled = deal.advertiserDealStatus === 'Cancelled';
@@ -186,6 +191,13 @@ export default function DealDetailPage() {
     const vrm = deal.stock?.vrm || deal.stock?.stockId?.slice(0, 8) || '—';
     const shareUrl = `https://checkout.autodesk.com/deal/${dealId}`;
     const pinCode = dealId.slice(-4).toUpperCase();
+
+    // Customer is active = messages updated within last 30 minutes
+    const customerIsActive = !!deal.messages?.lastUpdated &&
+        Date.now() - new Date(deal.messages.lastUpdated).getTime() < 30 * 60 * 1000;
+
+    // Deal is locked = reservation payment is Held (customer paid deposit)
+    const isLocked = deal.reservation?.fee?.status === 'Held' && !isCompleted && !isCancelled;
 
     const TABS: { key: Tab; label: string }[] = [
         { key: 'deal', label: 'Deal' },
@@ -212,6 +224,37 @@ export default function DealDetailPage() {
                 </div>
             )}
 
+            {/* ── Customer Is Active banner ── */}
+            {customerIsActive && (
+                <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <div className="relative flex-shrink-0">
+                        <span className="block w-3 h-3 bg-emerald-500 rounded-full" />
+                        <span className="absolute inset-0 w-3 h-3 bg-emerald-400 rounded-full animate-ping" />
+                    </div>
+                    <div>
+                        <p className="text-[13px] font-bold text-emerald-800">Customer Is Active</p>
+                        <p className="text-[11px] text-emerald-600">
+                            {deal.consumer.firstName} {deal.consumer.lastName} is actively viewing this deal. We strongly recommend you do not make changes without communicating with the customer first.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Locked Deal banner ── */}
+            {isLocked && (
+                <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+                    <svg className="w-5 h-5 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 1C8.676 1 6 3.676 6 7v1H4a1 1 0 00-1 1v13a1 1 0 001 1h16a1 1 0 001-1V9a1 1 0 00-1-1h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v1H8V7c0-2.276 1.724-4 4-4zm0 9a2 2 0 110 4 2 2 0 010-4z"/>
+                    </svg>
+                    <div>
+                        <p className="text-[13px] font-bold text-amber-800">Locked Deal</p>
+                        <p className="text-[11px] text-amber-700">
+                            This deal is locked because a payment of <strong>£{deal.reservation?.fee?.amountGBP?.toLocaleString()}</strong> has been received ({deal.reservation?.fee?.status}). To make changes, decline the deal and create a new one.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -229,10 +272,16 @@ export default function DealDetailPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        {isLocked && (
+                            <span className="flex items-center gap-1 text-[11px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 1C8.676 1 6 3.676 6 7v1H4a1 1 0 00-1 1v13a1 1 0 001 1h16a1 1 0 001-1V9a1 1 0 00-1-1h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v1H8V7c0-2.276 1.724-4 4-4zm0 9a2 2 0 110 4 2 2 0 010-4z"/></svg>
+                                Locked
+                            </span>
+                        )}
                         <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${statusColor}`}>
                             {deal.advertiserDealStatus}
                         </span>
-                        {isActive && (
+                        {isActive && !isLocked && (
                             <>
                                 <button
                                     onClick={handleAccept}
@@ -249,6 +298,9 @@ export default function DealDetailPage() {
                                     Decline
                                 </button>
                             </>
+                        )}
+                        {isActive && isLocked && (
+                            <span className="text-[11px] text-slate-400 italic">Unlock by declining the deal</span>
                         )}
                     </div>
                 </div>
@@ -429,81 +481,14 @@ export default function DealDetailPage() {
 
                 {/* ── FINANCE TAB ── */}
                 {activeTab === 'finance' && (
-                    <div className="p-5">
-                        {deal.financeApplication ? (
-                            <div className="border border-slate-100 rounded-xl p-5">
-                                <h3 className="text-[13px] font-bold text-slate-800 mb-2">Finance Application</h3>
-                                <p className="text-[12px] text-slate-500 mb-4">Application ID: <span className="font-mono font-semibold">{deal.financeApplication.id}</span></p>
-                                <div className="flex gap-2">
-                                    <span className="text-[11px] bg-blue-50 text-blue-600 font-bold px-3 py-1.5 rounded-lg">Submitted</span>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="max-w-xl mx-auto">
-                                <h3 className="text-[14px] font-bold text-slate-800 mb-1">Finance Application</h3>
-                                <p className="text-[12px] text-slate-500 mb-5">Generate finance quotes and submit an application for this deal.</p>
-
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Annual Income</label>
-                                            <input type="number" placeholder="£35,000" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Employment Status</label>
-                                            <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]">
-                                                <option>Employed Full Time</option>
-                                                <option>Employed Part Time</option>
-                                                <option>Self Employed</option>
-                                                <option>Retired</option>
-                                                <option>Unemployed</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Deposit</label>
-                                            <input type="number" placeholder="£1,000" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Term (months)</label>
-                                            <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]">
-                                                <option>24</option>
-                                                <option>36</option>
-                                                <option>48</option>
-                                                <option>60</option>
-                                                <option>72</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Finance Type</label>
-                                            <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]">
-                                                <option>Hire Purchase (HP)</option>
-                                                <option>Personal Contract Purchase (PCP)</option>
-                                                <option>Personal Loan</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wider">Annual Mileage</label>
-                                            <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#4D7CFF]">
-                                                <option>6,000</option>
-                                                <option>8,000</option>
-                                                <option>10,000</option>
-                                                <option>12,000</option>
-                                                <option>15,000</option>
-                                                <option>20,000</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <button className="w-full py-2.5 bg-[#4D7CFF] text-white text-[13px] font-bold rounded-lg hover:bg-blue-600 transition-colors">
-                                        Generate Finance Quotes
-                                    </button>
-                                </div>
-
-                                <div className="mt-6 p-4 bg-slate-50 rounded-xl text-center text-[12px] text-slate-400">
-                                    Finance quotes will appear here after generating.
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <FinanceTab
+                        dealId={dealId}
+                        existingApplicationId={deal.financeApplication?.id ?? null}
+                        dealPrice={totalPrice}
+                        consumerFirstName={deal.consumer.firstName}
+                        consumerLastName={deal.consumer.lastName}
+                        consumerEmail={deal.consumer.email}
+                    />
                 )}
 
                 {/* ── CONFIRM TAB ── */}
@@ -521,7 +506,7 @@ export default function DealDetailPage() {
                                     {isCancelled && <span className="text-[11px] text-slate-400">✕ This deal was declined</span>}
                                 </div>
 
-                                {isActive && (
+                                {isActive && !isLocked && (
                                     <div className="space-y-2">
                                         <button onClick={handleAccept} disabled={updatingStatus} className="w-full py-2.5 bg-emerald-500 text-white font-bold text-[13px] rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
@@ -530,6 +515,12 @@ export default function DealDetailPage() {
                                         <button onClick={() => setShowDeclineModal(true)} className="w-full py-2.5 border border-red-200 text-red-500 font-bold text-[13px] rounded-lg hover:bg-red-50 transition-colors">
                                             Decline Deal
                                         </button>
+                                    </div>
+                                )}
+                                {isActive && isLocked && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-700 text-center">
+                                        <svg className="w-4 h-4 mx-auto mb-1 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 1C8.676 1 6 3.676 6 7v1H4a1 1 0 00-1 1v13a1 1 0 001 1h16a1 1 0 001-1V9a1 1 0 00-1-1h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v1H8V7c0-2.276 1.724-4 4-4zm0 9a2 2 0 110 4 2 2 0 010-4z"/></svg>
+                                        Deal is locked. To make changes, decline the deal and create a new one.
                                     </div>
                                 )}
                             </div>
@@ -590,13 +581,13 @@ export default function DealDetailPage() {
                                 ) : messages.length === 0 ? (
                                     <div className="text-center py-8 text-[12px] text-slate-400">No messages yet.</div>
                                 ) : messages.map((msg, i) => {
-                                    const isDealer = msg.author !== deal.consumer?.email;
+                                    const isDealer = msg.from === 'Advertiser';
                                     return (
                                         <div key={i} className={`flex ${isDealer ? 'justify-end' : 'justify-start'}`}>
                                             <div className={`max-w-[80%] px-4 py-2.5 rounded-xl text-[13px] ${isDealer ? 'bg-[#4D7CFF] text-white rounded-tr-sm' : 'bg-slate-100 text-slate-800 rounded-tl-sm'}`}>
-                                                <p>{msg.body}</p>
+                                                <p>{msg.message}</p>
                                                 <p className={`text-[10px] mt-1 ${isDealer ? 'text-blue-200' : 'text-slate-400'}`}>
-                                                    {new Date(msg.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                    {new Date(msg.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                                 </p>
                                             </div>
                                         </div>

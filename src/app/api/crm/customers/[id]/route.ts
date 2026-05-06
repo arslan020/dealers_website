@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Customer from '@/models/Customer';
 import { getSession } from '@/lib/session';
@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         const customer = await Customer.findOneAndUpdate(
             { _id: id, tenantId: session.tenantId },
             { $set: updateFields },
-            { new: true }
+            { returnDocument: 'after' }
         );
         if (!customer) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
         return NextResponse.json({ ok: true, customer });

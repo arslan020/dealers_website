@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Calendar from '@/models/Calendar';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -49,7 +49,7 @@ async function updateCalendar(req: NextRequest) {
     const calendar = await Calendar.findOneAndUpdate(
         { _id: id, tenantId: new mongoose.Types.ObjectId(tenantId) },
         { $set: updates },
-        { new: true }
+        { returnDocument: 'after' }
     );
     if (!calendar) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true, calendar });
@@ -75,3 +75,4 @@ export const GET    = withErrorHandler(listCalendars);
 export const POST   = withErrorHandler(createCalendar);
 export const PATCH  = withErrorHandler(updateCalendar);
 export const DELETE = withErrorHandler(deleteCalendar);
+

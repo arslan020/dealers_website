@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import ConditionReport from '@/models/ConditionReport';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -28,7 +28,7 @@ async function updateConditionReport(req: NextRequest, context: { params?: any }
     const report = await ConditionReport.findOneAndUpdate(
         { _id: reportId, vehicleId, tenantId },
         { $set: body },
-        { new: true }
+        { returnDocument: 'after' }
     );
 
     if (!report) return NextResponse.json({ ok: false, error: 'Report not found' }, { status: 404 });

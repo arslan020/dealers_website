@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Appointment from '@/models/Appointment';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -82,7 +82,7 @@ async function updateAppointment(req: NextRequest) {
         const appointment = await Appointment.findOneAndUpdate(
             { _id: id, tenantId },
             updateData,
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!appointment) {
@@ -129,3 +129,4 @@ export const GET = withErrorHandler(getAppointments);
 export const POST = withErrorHandler(createAppointment);
 export const PATCH = withErrorHandler(updateAppointment);
 export const DELETE = withErrorHandler(deleteAppointment);
+

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import VehicleChecklist from '@/models/VehicleChecklist';
 import ChecklistTemplate from '@/models/ChecklistTemplate';
@@ -75,7 +75,7 @@ async function postHandler(req: NextRequest, { params }: { params: Promise<{ id:
                 notes: '',
             },
         },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
     ).lean() as any;
 
     return NextResponse.json({ ok: true, checklist: formatChecklist(checklist) });
@@ -95,7 +95,7 @@ async function patchHandler(req: NextRequest, { params }: { params: Promise<{ id
     const checklist = await VehicleChecklist.findOneAndUpdate(
         { tenantId: new mongoose.Types.ObjectId(tenantId), vehicleId: new mongoose.Types.ObjectId(vehicleId) },
         { $set: update },
-        { new: true }
+        { returnDocument: 'after' }
     ).lean() as any;
 
     if (!checklist) return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });

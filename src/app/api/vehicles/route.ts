@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Vehicle from '@/models/Vehicle';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -73,7 +73,7 @@ async function getVehicles(req: NextRequest) {
 
     // 3. Merge Strategy
     // Build two lookup maps: VRM -> local vehicle, and stockId -> local vehicle
-    // (from the FILTERED set — used to enrich mergedList items)
+    // (from the FILTERED set â€” used to enrich mergedList items)
     const localByVrm = new Map();    // VRM (uppercase) -> local vehicle
     const localByStockId = new Map(); // stockId -> local vehicle
     localVehicles.forEach((v: any) => {
@@ -81,7 +81,7 @@ async function getVehicles(req: NextRequest) {
         if (v.stockId) localByStockId.set(v.stockId, v);
     });
 
-    // Lookup maps from ALL local vehicles — used to block AT-only rows that have
+    // Lookup maps from ALL local vehicles â€” used to block AT-only rows that have
     // a local record with a different status (e.g. vehicle moved to Draft).
     const allLocalByVrm = new Map();
     const allLocalByStockId = new Map();
@@ -128,7 +128,7 @@ async function getVehicles(req: NextRequest) {
             );
             if (index !== -1) {
                 const local = mergedList[index];
-                // Prefer local DB images over AT cache — AT cache may be stale/empty after an edit
+                // Prefer local DB images over AT cache â€” AT cache may be stale/empty after an edit
                 const hasSavedImages = local.primaryImage && local.primaryImage !== '';
                 mergedList[index] = {
                     ...local,
@@ -148,15 +148,15 @@ async function getVehicles(req: NextRequest) {
             }
         } else {
             // This AT vehicle has no match in the FILTERED local set.
-            // Check the FULL local set — if there's a local record with a different
+            // Check the FULL local set â€” if there's a local record with a different
             // status (e.g. Draft/Sold/Reserved), do NOT add it as an AT-only row.
             // This prevents a Draft vehicle from reappearing in the "In Stock" tab.
             const localRecordAny = allLocalByVrm.get(vrm) || allLocalByStockId.get(atv.id);
             if (localRecordAny) {
-                // A local record exists but its status doesn't match the current filter — skip.
+                // A local record exists but its status doesn't match the current filter â€” skip.
                 // (If the filter is 'All', this branch is never reached because allLocal === localVehicles.)
             } else {
-                // Pure AT-only vehicle (no local record at all) — use status from AT cache.
+                // Pure AT-only vehicle (no local record at all) â€” use status from AT cache.
                 const atVehicleStatus = atv.status || 'In Stock'; // set correctly by autotrader-stock route
 
                 // Skip if a specific status filter is active and this vehicle doesn't match.
@@ -195,7 +195,7 @@ async function getVehicles(req: NextRequest) {
         }
     });
 
-    // Sort by createdAt ascending — stable sort that is not affected by edits (which change updatedAt)
+    // Sort by createdAt ascending â€” stable sort that is not affected by edits (which change updatedAt)
     mergedList.sort((a, b) => {
         const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -212,11 +212,11 @@ async function getVehicles(req: NextRequest) {
 }
 
 
-// Map local condition values → AT-valid values (AT uses 'Average', not 'Fair')
+// Map local condition values â†’ AT-valid values (AT uses 'Average', not 'Fair')
 const AT_CONDITION_MAP: Record<string, string> = {
     'Excellent': 'Excellent', 'Good': 'Good', 'Fair': 'Average', 'Poor': 'Poor',
 };
-// Map local origin values → AT-valid values
+// Map local origin values â†’ AT-valid values
 const AT_ORIGIN_MAP: Record<string, string> = {
     'UK Vehicle': 'UK', 'Import': 'Non UK',
 };
@@ -313,7 +313,7 @@ async function createVehicle(req: NextRequest) {
     const body = await req.json();
     await connectToDatabase();
 
-    // Normalise serviceHistory — AutoTrader may return short values like 'Full', 'Part', 'None'
+    // Normalise serviceHistory â€” AutoTrader may return short values like 'Full', 'Part', 'None'
     if (body.serviceHistory) {
         const sh = String(body.serviceHistory).toLowerCase().trim();
         const serviceHistoryMap: Record<string, string> = {
@@ -334,11 +334,11 @@ async function createVehicle(req: NextRequest) {
 
     const vehicle = await Vehicle.create({
         ...body,
-        status: body.status || 'Draft', // Always default to Draft — user must explicitly publish
+        status: body.status || 'Draft', // Always default to Draft â€” user must explicitly publish
         tenantId,
     });
 
-    // ─── Push to AutoTrader (Draft = FORECOURT + NOT_PUBLISHED, In Stock = FORECOURT + PUBLISHED) ──
+    // â”€â”€â”€ Push to AutoTrader (Draft = FORECOURT + NOT_PUBLISHED, In Stock = FORECOURT + PUBLISHED) â”€â”€
     const isDraft = vehicle.status === 'Draft';
     try {
         if (!vehicle.derivativeId) {
@@ -397,7 +397,7 @@ async function updateVehicle(req: NextRequest) {
             }
         } catch {}
 
-        // Use findOneAndUpdate with upsert — atomically find or create.
+        // Use findOneAndUpdate with upsert â€” atomically find or create.
         // This prevents race conditions where two concurrent requests both
         // see no existing record and both try to create one (duplicate bug).
         vehicle = await Vehicle.findOneAndUpdate(
@@ -418,10 +418,10 @@ async function updateVehicle(req: NextRequest) {
                 year: cachedStock?.vehicle?.yearOfManufacture || '',
                 mileage: cachedStock?.vehicle?.odometerReadingMiles || 0,
             }},
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
         );
 
-        // ── Build a safe $set — only update image fields if explicitly saving images ──
+        // â”€â”€ Build a safe $set â€” only update image fields if explicitly saving images â”€â”€
         // Strip image-related fields unless this is explicitly an image save (imageIds in payload).
         // This prevents ANY non-image tab save from ever wiping uploaded images or videos.
         const IMAGE_FIELDS = ['images', 'imageIds', 'primaryImage', 'imagesCount', 'imageMetadata'];
@@ -436,15 +436,15 @@ async function updateVehicle(req: NextRequest) {
             safeSet[k] = v;
         }
 
-        // Use $set so MongoDB only touches the keys in safeSet — everything else is preserved
+        // Use $set so MongoDB only touches the keys in safeSet â€” everything else is preserved
         vehicle = await Vehicle.findOneAndUpdate(
             { stockId: atId, tenantId },
             { $set: safeSet },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!vehicle) {
-            // Vehicle not yet in local DB — create it from AT cache data
+            // Vehicle not yet in local DB â€” create it from AT cache data
             vehicle = await Vehicle.findOneAndUpdate(
                 { stockId: atId, tenantId },
                 { $setOnInsert: {
@@ -464,11 +464,11 @@ async function updateVehicle(req: NextRequest) {
                     mileage: cachedStock?.vehicle?.odometerReadingMiles || 0,
                     ...safeSet,
                 }},
-                { upsert: true, new: true, setDefaultsOnInsert: true }
+                { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
             );
         }
     } else {
-        // Standard local vehicle update — use $set so ONLY specified fields change
+        // Standard local vehicle update â€” use $set so ONLY specified fields change
         const IMAGE_FIELDS = ['images', 'imageIds', 'primaryImage', 'imagesCount', 'imageMetadata'];
         const VIDEO_FIELDS = ['youtubeVideoIds'];
 
@@ -483,13 +483,13 @@ async function updateVehicle(req: NextRequest) {
             vehicle = await Vehicle.findOneAndUpdate(
                 { stockId: id, tenantId },
                 { $set: safeSet },
-                { new: true }
+                { returnDocument: 'after' }
             );
         } else {
             vehicle = await Vehicle.findOneAndUpdate(
                 { _id: id, tenantId },
                 { $set: safeSet },
-                { new: true }
+                { returnDocument: 'after' }
             );
         }
     }
@@ -499,7 +499,7 @@ async function updateVehicle(req: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Vehicle not found' }, { status: 404 });
     }
 
-    // ─── Sync with AutoTrader / Updates ──────────────────────────────────────
+    // â”€â”€â”€ Sync with AutoTrader / Updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const client = new AutoTraderClient(tenantId);
     await client.init();
     
@@ -523,14 +523,14 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 2. Sync Price (£75 minimum enforced)
+    // 2. Sync Price (Â£75 minimum enforced)
     if (vehicle.stockId && (updateData.price !== undefined || updateData.forecourtPrice !== undefined)) {
         const retailAdverts: Record<string, any> = {};
         const advertsTopLevel: Record<string, any> = {};
 
         if (updateData.price !== undefined) {
             if (Number(updateData.price) < 75) {
-                console.warn('[AutoTrader] Supplied price too low (£75 min), skipping AT sync');
+                console.warn('[AutoTrader] Supplied price too low (Â£75 min), skipping AT sync');
             } else {
                 retailAdverts.suppliedPrice = { amountGBP: Number(updateData.price) };
             }
@@ -654,13 +654,13 @@ async function updateVehicle(req: NextRequest) {
             fuelType:             'fuelType',
             transmission:         'transmissionType',
             bodyType:             'bodyType',
-            // Note: make, model, derivative, generation are read-only on AT — derived from derivativeId
+            // Note: make, model, derivative, generation are read-only on AT â€” derived from derivativeId
             // Only these direct vehicle fields are safely patchable per AT docs
             year:                 'yearOfManufacture',
             vin:                  'vin',
             doors:                'doors',
             seats:                'seats',
-            // ── Newly synced fields ───────────────────────────────────────────
+            // â”€â”€ Newly synced fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             engineNumber:         'engineNumber',
             plate:                'plate',
             emissionClass:        'emissionClass',
@@ -688,9 +688,9 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.v5Present !== undefined)              vehicleUpdate.v5Certificate           = updateData.v5Present;
         if (updateData.exDemo !== undefined)                 vehicleUpdate.exDemo                  = updateData.exDemo;
         if (updateData.manufacturerWarrantyMonths !== undefined) vehicleUpdate.warrantyMonthsOnPurchase = Number(updateData.manufacturerWarrantyMonths);
-        // Origin: 'UK Vehicle' → 'UK', 'Import' → 'Non UK'
+        // Origin: 'UK Vehicle' â†’ 'UK', 'Import' â†’ 'Non UK'
         if (updateData.origin !== undefined)                 vehicleUpdate.origin                  = AT_ORIGIN_MAP[updateData.origin] ?? updateData.origin;
-        // Conditions: 'Fair' → 'Average' (AT doesn't accept 'Fair')
+        // Conditions: 'Fair' â†’ 'Average' (AT doesn't accept 'Fair')
         if (updateData.interiorCondition !== undefined)      vehicleUpdate.interiorCondition       = AT_CONDITION_MAP[updateData.interiorCondition] ?? updateData.interiorCondition;
         if (updateData.tyreCondition !== undefined)          vehicleUpdate.tyreCondition           = AT_CONDITION_MAP[updateData.tyreCondition]     ?? updateData.tyreCondition;
         if (updateData.exteriorCondition !== undefined)      vehicleUpdate.bodyCondition           = AT_CONDITION_MAP[updateData.exteriorCondition] ?? updateData.exteriorCondition;
@@ -737,7 +737,7 @@ async function updateVehicle(req: NextRequest) {
     }
 
     // 7. Sync media images (full imageId list replacement)
-    // Only sync real AT imageIds — filter out fallback 'img-N' placeholder IDs
+    // Only sync real AT imageIds â€” filter out fallback 'img-N' placeholder IDs
     const realImageIds = (updateData.imageIds as string[] || []).filter(
         (id: string) => id && !id.startsWith('img-')
     );
@@ -746,7 +746,7 @@ async function updateVehicle(req: NextRequest) {
         const cdnHost = atApiUrl.includes('sandbox') ? 'm-qa.atcdn.co.uk' : 'm.atcdn.co.uk';
         const cdnUrls = realImageIds.map((imageId: string) => `https://${cdnHost}/a/media/{resize}/${imageId}.jpg`);
 
-        // ── Always persist imageIds/images/primaryImage locally ───────────────
+        // â”€â”€ Always persist imageIds/images/primaryImage locally â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // This ensures images survive page refresh even for vehicles without stockId
         try {
             await Vehicle.findOneAndUpdate(
@@ -764,7 +764,7 @@ async function updateVehicle(req: NextRequest) {
             console.error('[Local DB Images Persist Error]', dbErr);
         }
 
-        // ── Also sync to AutoTrader if this vehicle is linked ─────────────────
+        // â”€â”€ Also sync to AutoTrader if this vehicle is linked â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (vehicle.stockId) {
             try {
                 const imagesPayload = realImageIds.map((imageId: string) => ({ imageId }));
@@ -813,19 +813,19 @@ async function updateVehicle(req: NextRequest) {
                     if (updateData.description2 !== undefined) stockItem.adverts.retailAdverts.description2 = updateData.description2;
                     if (updateData.attentionGrabber !== undefined) stockItem.adverts.retailAdverts.attentionGrabber = updateData.attentionGrabber;
 
-                    // ── Sync media images so reload shows updated images ──────────
-                    // Only update cache with real AT imageIds — skip fallback img-N IDs
+                    // â”€â”€ Sync media images so reload shows updated images â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // Only update cache with real AT imageIds â€” skip fallback img-N IDs
                     const cacheImageIds = (updateData.imageIds as string[] || []).filter(
                         (id: string) => id && !id.startsWith('img-')
                     );
                     if (updateData.imageIds !== undefined && cacheImageIds.length > 0) {
-                        // Build a lookup of existing imageId → href from current cache
+                        // Build a lookup of existing imageId â†’ href from current cache
                         // This preserves the original CDN hostname (sandbox m-qa vs production m)
                         const existingHrefs: Record<string, string> = {};
                         const existingImages = stockItem.media?.images || stockItem.images || [];
                         for (const img of existingImages) {
                             if (typeof img === 'string') {
-                                // Plain URL — extract imageId from filename
+                                // Plain URL â€” extract imageId from filename
                                 const match = img.match(/\/([a-f0-9]{32})(?:\.jpg)?/i);
                                 if (match) existingHrefs[match[1]] = img.includes('{resize}') ? img : img.replace(/\/w\d+h\d+\//, '/{resize}/');
                             } else if (img?.imageId && img?.href) {
@@ -893,7 +893,7 @@ async function deleteVehicle(req: NextRequest) {
         }
     }
 
-    // ─── Sync Delete with AutoTrader if linked ─────────────────────────────────
+    // â”€â”€â”€ Sync Delete with AutoTrader if linked â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // AT Connect API docs: You MUST unpublish all channels FIRST, then set
     // lifecycleState to 'DELETED' via PATCH. There is no HTTP DELETE on /stock/.
     if (stockIdToDelete) {
@@ -906,9 +906,9 @@ async function deleteVehicle(req: NextRequest) {
                 await client.unpublishAll(stockIdToDelete);
                 console.log(`[AutoTrader Sync] Unpublished all channels for stock ${stockIdToDelete}`);
             } catch (unpublishError: any) {
-                // 404 means stock doesn't exist on AT — safe to continue with local delete
+                // 404 means stock doesn't exist on AT â€” safe to continue with local delete
                 if (unpublishError?.status === 404 || unpublishError?.message?.includes('404')) {
-                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT — skipping unpublish`);
+                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT â€” skipping unpublish`);
                 } else {
                     throw unpublishError;
                 }
@@ -920,14 +920,14 @@ async function deleteVehicle(req: NextRequest) {
                 console.log(`[AutoTrader Sync] lifecycleState set to DELETED for stock ${stockIdToDelete}`);
             } catch (deleteError: any) {
                 if (deleteError?.status === 404 || deleteError?.message?.includes('404')) {
-                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT — already deleted`);
+                    console.log(`[AutoTrader Sync] Stock ${stockIdToDelete} not found on AT â€” already deleted`);
                 } else {
                     throw deleteError;
                 }
             }
 
         } catch (atError: any) {
-            // Non-fatal: log and continue — local delete should always succeed
+            // Non-fatal: log and continue â€” local delete should always succeed
             console.error('[AutoTrader Sync Delete Error]', atError.message || atError);
         }
     }
@@ -936,7 +936,7 @@ async function deleteVehicle(req: NextRequest) {
         await Vehicle.deleteOne({ _id: localIdToDelete, tenantId });
     }
 
-    // ─── Remove from AT Cache so it won't reappear on page refresh ────────────
+    // â”€â”€â”€ Remove from AT Cache so it won't reappear on page refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // The cache is the source for the vehicles list page merge. If we don't
     // remove it here, the deleted vehicle will reappear until the next SYNC.
     if (stockIdToDelete) {
@@ -958,3 +958,4 @@ export const GET = withErrorHandler(getVehicles);
 export const POST = withErrorHandler(createVehicle);
 export const PATCH = withErrorHandler(updateVehicle);
 export const DELETE = withErrorHandler(deleteVehicle);
+
