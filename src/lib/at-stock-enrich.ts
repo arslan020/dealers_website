@@ -57,6 +57,8 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             return String(val);
         };
         const fill = (localVal: any, atVal: any) => (localVal !== undefined && localVal !== null && localVal !== '' ? localVal : atVal);
+        // AT wins: use AT value when available, fall back to local (for factual AT-owned fields)
+        const atWins = (atVal: any, localVal: any) => (atVal !== undefined && atVal !== null && atVal !== '' ? atVal : localVal);
 
         // longAttentionGrabber is stored in AT as description2 (when ≤70 chars and no newlines)
         const atDesc2 = live.adverts?.retailAdverts?.description2 || '';
@@ -69,24 +71,26 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             vrm:          fill(doc.vrm,          toStr(liveV.registration || liveV.vrm || liveV.registrationNumber)),
             make:         fill(doc.make === 'Unknown' ? '' : doc.make, toStr(liveV.make)),
             model:        fill(doc.model === 'Unknown' ? '' : doc.model, toStr(liveV.model)),
-            derivative:   fill(doc.derivative,   toStr(liveV.derivative)),
-            generation:   fill(doc.generation,   toStr(liveV.generation)),
-            trim:         fill(doc.trim,         toStr(liveV.trim)),
-            bodyType:     fill(doc.bodyType,     toStr(liveV.bodyType)),
-            fuelType:     fill(doc.fuelType,     toStr(liveV.fuelType)),
-            transmission: fill(doc.transmission, toStr(liveV.transmissionType)),
-            colour:       fill(doc.colour,       toStr(liveV.colour)),
-            exteriorFinish: fill(doc.exteriorFinish, toStr(liveV.exteriorFinish)),
-            drivetrain:   fill(doc.drivetrain,   toStr(liveV.drivetrain)),
-            year:         fill(doc.year,         liveV.yearOfManufacture ? String(liveV.yearOfManufacture) : ''),
-            doors:        fill(doc.doors,        liveV.doors ?? undefined),
-            seats:        fill(doc.seats,        liveV.seats ?? undefined),
-            mileage:      fill(doc.mileage,      liveV.odometerReadingMiles ?? undefined),
-            engineSize:   fill(doc.engineSize,   liveV.engineSizeCc ? String(liveV.engineSizeCc) : (liveV.badgeEngineSizeLitres ? String(liveV.badgeEngineSizeLitres) : '')),
-            vin:          fill(doc.vin,          liveV.vin || ''),
-            dateOfRegistration: fill(doc.dateOfRegistration, liveV.firstRegistrationDate || ''),
-            previousOwners: fill(doc.previousOwners, liveV.previousOwners ?? undefined),
-            serviceHistory: fill(doc.serviceHistory, liveV.serviceHistory || ''),
+            // AT taxonomy/factual fields — AT always wins (authoritative source)
+            derivative:   atWins(toStr(liveV.derivative),   doc.derivative),
+            generation:   atWins(toStr(liveV.generation),   doc.generation),
+            trim:         atWins(toStr(liveV.trim),         doc.trim),
+            bodyType:     atWins(toStr(liveV.bodyType),     doc.bodyType),
+            fuelType:     atWins(toStr(liveV.fuelType),     doc.fuelType),
+            transmission: atWins(toStr(liveV.transmissionType), doc.transmission),
+            colour:       atWins(toStr(liveV.colour),       doc.colour),
+            exteriorFinish: atWins(toStr(liveV.exteriorFinish), doc.exteriorFinish),
+            drivetrain:   atWins(toStr(liveV.drivetrain),   doc.drivetrain),
+            year:         atWins(liveV.yearOfManufacture ? String(liveV.yearOfManufacture) : '', doc.year),
+            doors:        liveV.doors ?? doc.doors,
+            seats:        liveV.seats ?? doc.seats,
+            mileage:      liveV.odometerReadingMiles ?? doc.mileage,
+            price:        live.adverts?.forecourtPrice?.amountGBP ?? live.adverts?.retailAdverts?.suppliedPrice?.amountGBP ?? doc.price,
+            engineSize:   atWins(liveV.engineCapacityCC ? String(Math.round(liveV.engineCapacityCC / 1000 * 10) / 10) : (liveV.engineSizeCc ? String(liveV.engineSizeCc) : (liveV.badgeEngineSizeLitres ? String(liveV.badgeEngineSizeLitres) : '')), doc.engineSize),
+            vin:          atWins(liveV.vin || '',           doc.vin),
+            dateOfRegistration: atWins(liveV.firstRegistrationDate || '', doc.dateOfRegistration),
+            previousOwners: liveV.owners ?? liveV.previousOwners ?? doc.previousOwners,
+            serviceHistory: atWins(liveV.serviceHistory || '', doc.serviceHistory),
             // Always use AT as source of truth for adverts, features, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
             features:     Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
