@@ -63,6 +63,7 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
     const [vrm, setVrm] = useState('');
     const [lookupError, setLookupError] = useState('');
     const [vehicleData, setVehicleData] = useState<Record<string, any>>({});
+    const [featuresData, setFeaturesData] = useState<{ standardFeatures: any[]; optionalExtras: any[]; factoryFitted: string[] }>({ standardFeatures: [], optionalExtras: [], factoryFitted: [] });
 
     useEffect(() => {
         if (!open) {
@@ -70,6 +71,7 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
             setVrm('');
             setLookupError('');
             setVehicleData({});
+            setFeaturesData({ standardFeatures: [], optionalExtras: [], factoryFitted: [] });
             setLoading(false);
         }
     }, [open]);
@@ -94,6 +96,11 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
             const data = await res.json();
             if (data.ok && data.vehicle) {
                 setVehicleData(data.vehicle);
+                setFeaturesData({
+                    standardFeatures: data.standardFeatures || [],
+                    optionalExtras: data.optionalExtras || [],
+                    factoryFitted: data.factoryFitted || [],
+                });
                 setStep(2);
             } else {
                 setLookupError(data.error?.message || 'Vehicle not found. Check the registration and try again.');
@@ -122,8 +129,9 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
                     derivativeId: v.derivativeId || '',
                     colour: v.colour || '',
                     colourName: v.colour || '',
-                    dateOfRegistration: v.year || '',
-                    engineSize: v.engineSize ? String(v.engineSize) : '',
+                    dateOfRegistration: v.registeredDate || undefined,
+                    emissionClass: v.technicalSpecs?.emissionClass || undefined,
+                    engineSize: v.engineSize ? String(v.engineSize) : undefined,
                     fuelType: v.fuelType || '',
                     transmission: v.transmission || 'Automatic',
                     bodyType: v.bodyType || '',
@@ -133,6 +141,10 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
                     trim: v.trim || '',
                     driverPosition: v.driverPosition || 'Right',
                     drivetrain: v.drivetrain || '',
+                    vin: v.vin || undefined,
+                    year: v.year || undefined,
+                    co2EmissionGPKM: v.co2EmissionGPKM || undefined,
+                    technicalSpecs: v.technicalSpecs || undefined,
                     status: 'Draft',
                     price: 0,
                     retailPrice: 0,
@@ -140,6 +152,11 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
                     mileage: 0,
                     previousOwners: 1,
                     serviceHistory: 'Full',
+                    features: featuresData.standardFeatures.map((f: any) => f.name).filter(Boolean),
+                    customFeatures: [
+                        ...featuresData.optionalExtras.filter((f: any) => f.fitted).map((f: any) => f.name),
+                        ...featuresData.factoryFitted,
+                    ].filter(Boolean),
                 }),
             });
             const data = await res.json();

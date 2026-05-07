@@ -705,13 +705,15 @@ async function updateVehicle(req: NextRequest) {
 
         const vehicleUpdate: Record<string, any> = {};
         for (const [localKey, atKey] of Object.entries(vehicleFieldMap)) {
-            if (updateData[localKey] !== undefined) {
-                vehicleUpdate[atKey] = localKey === 'mileage'
-                    ? Number(updateData[localKey])
-                    : localKey === 'year' || localKey === 'plate'
-                    ? String(updateData[localKey])
-                    : updateData[localKey];
-            }
+            const val = updateData[localKey];
+            if (val === undefined) continue;
+            // AT rejects empty strings — send null to clear, skip if no meaningful value
+            if (val === '') continue;
+            vehicleUpdate[atKey] = localKey === 'mileage'
+                ? Number(val)
+                : localKey === 'year' || localKey === 'plate'
+                ? String(val)
+                : val;
         }
 
         // Fields that require value transformation before sending to AT
