@@ -788,8 +788,8 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.description2 !== undefined)       advertUpdate.description2       = updateData.description2;
         if (updateData.attentionGrabber !== undefined)   advertUpdate.attentionGrabber   = updateData.attentionGrabber;
         if (updateData.priceOnApplication !== undefined) advertUpdate.priceOnApplication = updateData.priceOnApplication;
-        // longAttentionGrabber (70 chars) stored in AT as description2 when description2 not separately set
-        if (updateData.longAttentionGrabber !== undefined && updateData.description2 === undefined) {
+        // longAttentionGrabber (70 chars) stored in AT as description2 when description2 is empty
+        if (updateData.longAttentionGrabber !== undefined && !updateData.description2) {
             const lag = String(updateData.longAttentionGrabber || '').trim().slice(0, 70);
             advertUpdate.description2 = lag || null;
         }
