@@ -694,13 +694,23 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 4. Create missing AT stock if vehicle was explicitly changed to 'In Stock'
-    if (!vehicle.stockId && updateData.status === 'In Stock') {
-        console.log(`[AutoTrader] Vehicle ${vehicle._id} changing to 'In Stock' but has no AT stockId. Pushing to AT now.`);
+    // 4. Create missing AT stock if vehicle is being moved to In Stock (no stockId yet)
+    // AT docs: min £75 required for Car/Bike/Van to be advertised
+    const inStockStatuses = ['In Stock', 'For Sale'];
+    if (!vehicle.stockId && updateData.status && inStockStatuses.includes(updateData.status)) {
+        console.log(`[AutoTrader] Vehicle ${vehicle._id} changing to '${updateData.status}' but has no AT stockId. Pushing to AT now.`);
         if (!vehicle.derivativeId) {
-            console.warn('[AutoTrader] Missing derivativeId, skipping stock creation.');
+            console.warn('[AutoTrader] Missing derivativeId — skipping AT stock creation. Set derivativeId first.');
+        } else if (!vehicle.price || Number(vehicle.price) < 75) {
+            console.warn(`[AutoTrader] Price £${vehicle.price || 0} is below AT minimum £75 — skipping AT stock creation. Add a price ≥ £75 and save again.`);
+            // Save atSyncError so the UI can show a helpful message
+            await Vehicle.findByIdAndUpdate(vehicle._id, {
+                $set: { atSyncError: 'Price must be at least £75 to sync with AutoTrader. Update the price and save again.' }
+            }).catch(() => {});
         } else {
             try {
+                // Clear any previous sync error
+                await Vehicle.findByIdAndUpdate(vehicle._id, { $unset: { atSyncError: '' } }).catch(() => {});
                 const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString());
                 const atResult = await client.createStock(atPayload);
                 if (atResult?.metadata?.stockId) {
@@ -714,7 +724,11 @@ async function updateVehicle(req: NextRequest) {
                 if (atError.status === 409 || atError.data?.message?.includes('stock item already exists')) {
                     console.log('[AutoTrader] Conflict detected during Draft->In Stock sync, AT stock already exists.');
                 } else {
-                    console.error('[AutoTrader createStock Error]', atError);
+                    const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown AT error';
+                    console.error(`[AutoTrader createStock Error] ${atMsg}`);
+                    await Vehicle.findByIdAndUpdate(vehicle._id, {
+                        $set: { atSyncError: `AutoTrader sync failed: ${atMsg}` }
+                    }).catch(() => {});
                 }
             }
         }
