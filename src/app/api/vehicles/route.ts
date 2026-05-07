@@ -121,6 +121,18 @@ async function getVehicles(req: NextRequest) {
         if (isATPublished) atStatus = 'Yes';
         else if (isProfilePublished) atStatus = 'Profile Only';
 
+        // AT is source of truth for status — map lifecycleState → local status
+        const AT_LIFECYCLE_MAP: Record<string, string> = {
+            FORECOURT:        'In Stock',
+            SALE_IN_PROGRESS: 'Reserved',
+            SOLD:             'Sold',
+            DUE_IN:           'Draft',
+            WASTEBIN:         'Deleted',
+            DELETED:          'Deleted',
+        };
+        const atLifecycle = atv.metadata?.lifecycleState;
+        const statusFromAT = atLifecycle ? (AT_LIFECYCLE_MAP[atLifecycle] || atv.status || 'In Stock') : (atv.status || 'In Stock');
+
         if (existing) {
             // Merge: find by VRM or stockId in the list
             const index = mergedList.findIndex(m =>
@@ -129,10 +141,17 @@ async function getVehicles(req: NextRequest) {
             );
             if (index !== -1) {
                 const local = mergedList[index];
-                // Prefer local DB images over AT cache â€” AT cache may be stale/empty after an edit
+
+                // If local DB status is stale vs AT, silently update it
+                if (atLifecycle && local.status !== statusFromAT && local._id) {
+                    Vehicle.findByIdAndUpdate(local._id, { $set: { status: statusFromAT } }).catch(() => {});
+                }
+
+                // Prefer local DB images over AT cache — AT cache may be stale/empty after an edit
                 const hasSavedImages = local.primaryImage && local.primaryImage !== '';
                 mergedList[index] = {
                     ...local,
+                    status: statusFromAT,  // AT is source of truth
                     stockId: atv.id,
                     // Heal stale 'Unknown' make/model from AT data
                     make: local.make === 'Unknown' ? atv.make : local.make,
@@ -149,16 +168,36 @@ async function getVehicles(req: NextRequest) {
             }
         } else {
             // This AT vehicle has no match in the FILTERED local set.
-            // Check the FULL local set â€” if there's a local record with a different
-            // status (e.g. Draft/Sold/Reserved), do NOT add it as an AT-only row.
-            // This prevents a Draft vehicle from reappearing in the "In Stock" tab.
+            // Check the FULL local set — if local record exists with stale status, update DB and include it.
             const localRecordAny = allLocalByVrm.get(vrm) || allLocalByStockId.get(atv.id);
             if (localRecordAny) {
-                // A local record exists but its status doesn't match the current filter â€” skip.
-                // (If the filter is 'All', this branch is never reached because allLocal === localVehicles.)
+                // Local record exists with different status — update it from AT and include if filter matches
+                if (atLifecycle && localRecordAny.status !== statusFromAT && localRecordAny._id) {
+                    Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: { status: statusFromAT } }).catch(() => {});
+                }
+                // Include in results if AT status matches the active filter
+                const filterMatches = !normalizedStatus || normalizedStatus === 'All' || normalizedStatus === statusFromAT;
+                const matchesSearch = !search ||
+                    atv.make?.toLowerCase().includes(search) ||
+                    atv.model?.toLowerCase().includes(search) ||
+                    atv.vrm?.toLowerCase().includes(search);
+                if (filterMatches && matchesSearch) {
+                    const hasSavedImages = localRecordAny.primaryImage && localRecordAny.primaryImage !== '';
+                    mergedList.push({
+                        ...localRecordAny,
+                        status: statusFromAT,
+                        stockId: atv.id,
+                        primaryImage: hasSavedImages ? localRecordAny.primaryImage : atv.primaryImage,
+                        imagesCount: hasSavedImages ? (localRecordAny.imagesCount || 0) : (atv.images?.length || 0),
+                        isLiveOnAT: isATPublished,
+                        atStatus,
+                        atData: atv,
+                        source: 'merged'
+                    });
+                }
             } else {
-                // Pure AT-only vehicle (no local record at all) â€” use status from AT cache.
-                const atVehicleStatus = atv.status || 'In Stock'; // set correctly by autotrader-stock route
+                // Pure AT-only vehicle (no local record at all) — use AT lifecycle status.
+                const atVehicleStatus = statusFromAT;
 
                 // Skip if a specific status filter is active and this vehicle doesn't match.
                 if (normalizedStatus && normalizedStatus !== 'All' && normalizedStatus !== atVehicleStatus) {
