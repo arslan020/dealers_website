@@ -79,6 +79,8 @@ export async function GET(
                     exteriorCondition: lv.bodyCondition || '',
                     exDemo: lv.exDemo ?? null,
                     v5Present: lv.v5Certificate ?? null,
+                    // Extract imageIds from AT media so images tab works on all environments
+                    imageIds: (live.media?.images || []).map((img: any) => img.imageId).filter(Boolean),
                     adverts: live.adverts,
                     features: live.features || [],
                     technicalSpecs: lv,
