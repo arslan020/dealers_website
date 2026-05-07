@@ -121,6 +121,18 @@ async function getAutoTraderStock(req: NextRequest) {
             }
 
             console.log(`[AutoTrader] Fresh stock fetched for tenant ${tenantObjectId}. ${allStock.length} vehicles.`);
+
+            // ─── Clean up local DB: remove vehicles whose stockId is no longer on AT ──
+            // Vehicles deleted from AT won't appear in /stock — mark them as Deleted locally.
+            const activeAtStockIds = new Set(allStock.map((v: any) => v.id).filter(Boolean));
+            Vehicle.updateMany(
+                {
+                    tenantId: tenantObjectId,
+                    stockId: { $exists: true, $ne: null, $nin: Array.from(activeAtStockIds) },
+                    status: { $nin: ['Deleted', 'Sold'] }, // don't re-mark already closed ones
+                },
+                { $set: { status: 'Deleted' } }
+            ).catch(() => {});
         } catch (error: any) {
             // If fresh fetch fails but we have stale cache, serve it anyway
             if (cache?.stock?.length) {
