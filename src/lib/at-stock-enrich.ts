@@ -58,8 +58,13 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
         };
         const fill = (localVal: any, atVal: any) => (localVal !== undefined && localVal !== null && localVal !== '' ? localVal : atVal);
 
+        // longAttentionGrabber is stored in AT as description2 (when ≤70 chars and no newlines)
+        const atDesc2 = live.adverts?.retailAdverts?.description2 || '';
+        const atLongGrabber = atDesc2 && atDesc2.length <= 70 && !atDesc2.includes('\n') ? atDesc2 : '';
+
         return {
             ...doc,
+            longAttentionGrabber: fill(doc.longAttentionGrabber, atLongGrabber),
             // Fill top-level vehicle fields from AT when local record is empty
             vrm:          fill(doc.vrm,          toStr(liveV.registration || liveV.vrm || liveV.registrationNumber)),
             make:         fill(doc.make === 'Unknown' ? '' : doc.make, toStr(liveV.make)),

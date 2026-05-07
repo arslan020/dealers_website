@@ -781,13 +781,18 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 5. Sync advert content (description, description2, attentionGrabber, priceOnApplication)
+    // 5. Sync advert content (description, description2, attentionGrabber, longAttentionGrabber, priceOnApplication)
     if (vehicle.stockId) {
         const advertUpdate: Record<string, any> = {};
         if (updateData.description !== undefined)        advertUpdate.description        = updateData.description;
         if (updateData.description2 !== undefined)       advertUpdate.description2       = updateData.description2;
         if (updateData.attentionGrabber !== undefined)   advertUpdate.attentionGrabber   = updateData.attentionGrabber;
         if (updateData.priceOnApplication !== undefined) advertUpdate.priceOnApplication = updateData.priceOnApplication;
+        // longAttentionGrabber (70 chars) stored in AT as description2 when description2 not separately set
+        if (updateData.longAttentionGrabber !== undefined && updateData.description2 === undefined) {
+            const lag = String(updateData.longAttentionGrabber || '').trim().slice(0, 70);
+            advertUpdate.description2 = lag || null;
+        }
 
         if (Object.keys(advertUpdate).length > 0) {
             // Strip HTML, enforce AT character limits, and omit empty fields (AT rejects empty strings)
