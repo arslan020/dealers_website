@@ -33,8 +33,8 @@ async function getAutoTraderStock(req: NextRequest) {
     // ─── Fetch fresh from AutoTrader with 5-minute TTL ──────────────────────────
     let cache = await AutoTraderStockCache.findOne({ tenantId: tenantObjectId });
     const CACHE_TTL_MS = 5 * 60 * 1000;
-    const cacheAge = cache?.fetchedAt ? now.getTime() - new Date(cache.fetchedAt).getTime() : Infinity;
-    const shouldFetch = cacheAge > CACHE_TTL_MS;
+    const cacheFetchedAgeMs = cache?.fetchedAt ? now.getTime() - new Date(cache.fetchedAt).getTime() : Infinity;
+    const shouldFetch = cacheFetchedAgeMs > CACHE_TTL_MS;
 
     if (shouldFetch) {
 
