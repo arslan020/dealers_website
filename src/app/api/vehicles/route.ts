@@ -262,8 +262,9 @@ const AT_ORIGIN_MAP: Record<string, string> = {
 };
 
 function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = false) {
-    // Combine standard features + custom (dealer-selected / factory-fitted optional) features
+    // Combine all feature types: standard (always sent) + optional selected + custom
     const allFeatureNames = [
+        ...(Array.isArray(vehicle.standardFeatures) ? vehicle.standardFeatures : []),
         ...(Array.isArray(vehicle.features) ? vehicle.features : []),
         ...(Array.isArray(vehicle.customFeatures) ? vehicle.customFeatures : []),
     ];
@@ -840,10 +841,11 @@ async function updateVehicle(req: NextRequest) {
     }
 
     // 6. Sync features list (full replacement as per AT docs)
-    // Combine features + customFeatures (same as create payload) and include factoryFitted flag
+    // standard (all) + optional selected + custom + factoryFitted flag
     if (vehicle.stockId && updateData.features !== undefined) {
         try {
             const allNames = [
+                ...(Array.isArray(updateData.standardFeatures ?? vehicle.standardFeatures) ? (updateData.standardFeatures ?? vehicle.standardFeatures) : []),
                 ...(Array.isArray(updateData.features) ? updateData.features : []),
                 ...(Array.isArray(updateData.customFeatures ?? vehicle.customFeatures) ? (updateData.customFeatures ?? vehicle.customFeatures) : []),
             ];
@@ -853,7 +855,7 @@ async function updateVehicle(req: NextRequest) {
                 return ffSet.has(name) ? { name, factoryFitted: true } : { name };
             });
             await client.updateStock(vehicle.stockId, { features: featuresPayload });
-            console.log(`[AutoTrader] Features synced: ${featuresPayload.length} items`);
+            console.log(`[AutoTrader] Features synced: ${featuresPayload.length} items (${(updateData.standardFeatures ?? vehicle.standardFeatures ?? []).length} std, ${(updateData.features ?? []).length} optional, ${(updateData.customFeatures ?? vehicle.customFeatures ?? []).length} custom)`);
         } catch (atError) {
             console.error('[AutoTrader Features Sync Error]', atError);
         }

@@ -279,6 +279,7 @@ const VehicleSchema = new Schema<IVehicle>(
         features: [{ type: String, trim: true }],
         customFeatures: [{ type: String, trim: true }],
         factoryFittedFeatures: [{ type: String, trim: true }],
+        standardFeatures: [{ type: String, trim: true }],
         imagesCount: { type: Number, default: 0 },
         videosCount: { type: Number, default: 0 },
         primaryImage: { type: String, trim: true },

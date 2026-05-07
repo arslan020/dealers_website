@@ -5041,6 +5041,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         features: editFeatures,
         customFeatures: editCustomFeatures,
         factoryFittedFeatures: editFeatures.filter(f => atFactoryFitted.has(f)),
+        // All standard features sent to AT as per AT docs requirement
+        standardFeatures: atStdFeatures.map(f => f.name),
     });
 
     const handleSaveImages = async () => {
