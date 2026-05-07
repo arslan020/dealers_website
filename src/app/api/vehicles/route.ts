@@ -267,8 +267,14 @@ function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = f
         ...(Array.isArray(vehicle.features) ? vehicle.features : []),
         ...(Array.isArray(vehicle.customFeatures) ? vehicle.customFeatures : []),
     ];
+    const factoryFittedSet = new Set<string>(
+        Array.isArray(vehicle.factoryFittedFeatures) ? vehicle.factoryFittedFeatures : []
+    );
     const featuresPayload = allFeatureNames.length > 0
-        ? allFeatureNames.map((f: any) => (typeof f === 'string' ? { name: f } : f))
+        ? allFeatureNames.map((f: any) => {
+            const name = typeof f === 'string' ? f : (f.name || '');
+            return factoryFittedSet.has(name) ? { name, factoryFitted: true } : { name };
+        })
         : undefined;
 
     // engineSize stored as CC string from lookup (e.g. "1998"). Treat values >100 as CC, <=100 as litres.

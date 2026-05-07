@@ -278,6 +278,7 @@ const VehicleSchema = new Schema<IVehicle>(
         longAttentionGrabber: { type: String, trim: true, maxlength: 70 },
         features: [{ type: String, trim: true }],
         customFeatures: [{ type: String, trim: true }],
+        factoryFittedFeatures: [{ type: String, trim: true }],
         imagesCount: { type: Number, default: 0 },
         videosCount: { type: Number, default: 0 },
         primaryImage: { type: String, trim: true },

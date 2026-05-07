@@ -5040,6 +5040,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         longAttentionGrabber: editLongAttentionGrabber,
         features: editFeatures,
         customFeatures: editCustomFeatures,
+        factoryFittedFeatures: editFeatures.filter(f => atFactoryFitted.has(f)),
     });
 
     const handleSaveImages = async () => {
