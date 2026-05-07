@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { AutoTraderClient } from '@/lib/autotrader';
 import { withErrorHandler } from '@/lib/api-handler';
+import connectDB from '@/lib/db';
+import Vehicle from '@/models/Vehicle';
 
 const CHANNEL_KEY_MAP: Record<string, string> = {
     autotrader: 'autotraderAdvert',
@@ -100,6 +102,15 @@ async function updateAdvertisingStatus(req: NextRequest, { params }: { params: P
                     message: atAdvert.message || undefined,
                 });
             }
+        }
+
+        // Persist AT-confirmed statuses to local Vehicle doc
+        if (Object.keys(actualStatuses).length > 0) {
+            await connectDB();
+            await Vehicle.findOneAndUpdate(
+                { stockId, tenantId: session.tenantId },
+                { $set: actualStatuses }
+            );
         }
 
         return NextResponse.json({ ok: true, result, actualStatuses, warnings });

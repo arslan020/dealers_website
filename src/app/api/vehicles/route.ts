@@ -648,8 +648,9 @@ async function updateVehicle(req: NextRequest) {
                         console.log(`[AutoTrader] Autotrader advert published for stock ${vehicle.stockId}`);
                     }
                 }
-            } catch (atError) {
-                console.error('[AutoTrader Lifecycle Sync Error]', atError);
+            } catch (atError: any) {
+                const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown error';
+                console.error(`[AutoTrader Lifecycle Sync Error] ${lifecycleState} → ${vehicle.stockId}: ${atMsg}`);
             }
         }
     }
@@ -750,11 +751,26 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.priceOnApplication !== undefined) advertUpdate.priceOnApplication = updateData.priceOnApplication;
 
         if (Object.keys(advertUpdate).length > 0) {
+            // Strip HTML, enforce AT character limits, and omit empty fields (AT rejects empty strings)
+            if (advertUpdate.description !== undefined) {
+                const v = advertDescriptionToPlainText(advertUpdate.description).trim().slice(0, 4000);
+                if (v) advertUpdate.description = v; else delete advertUpdate.description;
+            }
+            if (advertUpdate.description2 !== undefined) {
+                const v = advertDescriptionToPlainText(advertUpdate.description2).trim().slice(0, 4000);
+                if (v) advertUpdate.description2 = v; else delete advertUpdate.description2;
+            }
+            if (advertUpdate.attentionGrabber !== undefined) {
+                const v = String(advertUpdate.attentionGrabber).trim().slice(0, 30);
+                if (v) advertUpdate.attentionGrabber = v; else delete advertUpdate.attentionGrabber;
+            }
+
             try {
                 await client.updateStock(vehicle.stockId, { adverts: { retailAdverts: advertUpdate } });
                 console.log('[AutoTrader] Advert content synced');
-            } catch (atError) {
-                console.error('[AutoTrader Advert Sync Error]', atError);
+            } catch (atError: any) {
+                const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown error';
+                console.error(`[AutoTrader Advert Sync Error] ${vehicle.stockId}: ${atMsg}`, JSON.stringify(atError?.data));
             }
         }
     }
