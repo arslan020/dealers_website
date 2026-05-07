@@ -4,6 +4,7 @@ import connectToDatabase from '@/lib/db';
 import Lead from '@/models/Lead';
 import Customer from '@/models/Customer';
 import Tenant from '@/models/Tenant';
+import Vehicle from '@/models/Vehicle';
 import { sseEmitter } from '@/lib/sse';
 
 export async function PUT(req: NextRequest) {
@@ -79,8 +80,47 @@ export async function PUT(req: NextRequest) {
             case 'Cancelled':   statusUpdate = 'LOST'; break;
             default:            statusUpdate = 'NEW_LEAD';
         }
+        // ── ADVERTISER_UPDATE: stock lifecycle/advert status changed on AT ──────
+        if (type === 'ADVERTISER_UPDATE' && deal?.stockId && !deal?.dealId) {
+            const lifecycleMap: Record<string, string> = {
+                FORECOURT:        'In Stock',
+                SALE_IN_PROGRESS: 'Reserved',
+                SOLD:             'Sold',
+                DUE_IN:           'Draft',
+                WASTEBIN:         'Deleted',
+                DELETED:          'Deleted',
+            };
+
+            const vehicleUpdate: Record<string, any> = {};
+
+            if (deal.lifecycleState && lifecycleMap[deal.lifecycleState]) {
+                vehicleUpdate.status = lifecycleMap[deal.lifecycleState];
+            }
+
+            // Sync advert channel statuses if present
+            const ra = deal.adverts?.retailAdverts;
+            if (ra?.autotraderAdvert?.status)  vehicleUpdate.atAdvertStatus          = ra.autotraderAdvert.status;
+            if (ra?.advertiserAdvert?.status)  vehicleUpdate.advertiserAdvertStatus  = ra.advertiserAdvert.status;
+            if (ra?.locatorAdvert?.status)     vehicleUpdate.locatorAdvertStatus     = ra.locatorAdvert.status;
+            if (ra?.exportAdvert?.status)      vehicleUpdate.exportAdvertStatus      = ra.exportAdvert.status;
+            if (ra?.profileAdvert?.status)     vehicleUpdate.profileAdvertStatus     = ra.profileAdvert.status;
+
+            if (Object.keys(vehicleUpdate).length > 0) {
+                await Vehicle.findOneAndUpdate(
+                    { stockId: deal.stockId, tenantId: tenant._id },
+                    { $set: vehicleUpdate }
+                );
+                console.log(`[Webhook] Stock ${deal.stockId} updated:`, vehicleUpdate);
+
+                sseEmitter.emit('stock_update', {
+                    tenantId: tenant._id.toString(),
+                    payload: { event: 'STOCK_STATUS_UPDATE', stockId: deal.stockId, ...vehicleUpdate }
+                });
+            }
+        }
+
         if (type === 'DEAL' || type === 'ADVERTISER_UPDATE') {
-            
+
             // Save / Update Lead in DB for Real Time
             if (deal?.dealId) {
                 // Upsert customer if data is available
