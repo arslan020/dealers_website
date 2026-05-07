@@ -149,6 +149,10 @@ async function getVehicles(req: NextRequest) {
 
                 // Prefer local DB images over AT cache — AT cache may be stale/empty after an edit
                 const hasSavedImages = local.primaryImage && local.primaryImage !== '';
+                // Persist stockId to local doc if missing — enables AT fetch on detail page
+                if (!local.stockId && atv.id) {
+                    Vehicle.findByIdAndUpdate(local._id, { $set: { stockId: atv.id } }).catch(() => {});
+                }
                 mergedList[index] = {
                     ...local,
                     status: statusFromAT,  // AT is source of truth
@@ -172,8 +176,11 @@ async function getVehicles(req: NextRequest) {
             const localRecordAny = allLocalByVrm.get(vrm) || allLocalByStockId.get(atv.id);
             if (localRecordAny) {
                 // Local record exists with different status — update it from AT and include if filter matches
-                if (atLifecycle && localRecordAny.status !== statusFromAT && localRecordAny._id) {
-                    Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: { status: statusFromAT } }).catch(() => {});
+                if (localRecordAny._id) {
+                    const heal: Record<string, any> = {};
+                    if (atLifecycle && localRecordAny.status !== statusFromAT) heal.status = statusFromAT;
+                    if (!localRecordAny.stockId && atv.id) heal.stockId = atv.id;
+                    if (Object.keys(heal).length > 0) Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: heal }).catch(() => {});
                 }
                 // Include in results if AT status matches the active filter
                 const filterMatches = !normalizedStatus || normalizedStatus === 'All' || normalizedStatus === statusFromAT;
