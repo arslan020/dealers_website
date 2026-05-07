@@ -37,7 +37,9 @@ export async function enrichAtCacheStockRow(tenantId: string, cached: any): Prom
     }
 }
 
-/** Attach live `adverts` (+ features when present) to a local Mongo vehicle that has `stockId`. */
+/** Attach live `adverts` (+ features + vehicle fields when present) to a local Mongo vehicle that has `stockId`.
+ *  Also fills in any top-level fields that are empty/missing in the local doc from AT live data.
+ */
 export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: string, doc: any): Promise<any> {
     if (!stockId || !doc) return doc;
     try {
@@ -47,10 +49,42 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
         const live = extractLiveStockPayload(raw);
         if (!live) return doc;
         const liveV = live.vehicle && typeof live.vehicle === 'object' ? live.vehicle : {};
+
+        const toStr = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            if (typeof val === 'object') return val.name || val.value || '';
+            return String(val);
+        };
+        const fill = (localVal: any, atVal: any) => (localVal !== undefined && localVal !== null && localVal !== '' ? localVal : atVal);
+
         return {
             ...doc,
-            adverts: live.adverts ?? doc.adverts,
-            features: Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
+            // Fill top-level vehicle fields from AT when local record is empty
+            vrm:          fill(doc.vrm,          toStr(liveV.registration || liveV.vrm || liveV.registrationNumber)),
+            make:         fill(doc.make === 'Unknown' ? '' : doc.make, toStr(liveV.make)),
+            model:        fill(doc.model === 'Unknown' ? '' : doc.model, toStr(liveV.model)),
+            derivative:   fill(doc.derivative,   toStr(liveV.derivative)),
+            generation:   fill(doc.generation,   toStr(liveV.generation)),
+            trim:         fill(doc.trim,         toStr(liveV.trim)),
+            bodyType:     fill(doc.bodyType,     toStr(liveV.bodyType)),
+            fuelType:     fill(doc.fuelType,     toStr(liveV.fuelType)),
+            transmission: fill(doc.transmission, toStr(liveV.transmissionType)),
+            colour:       fill(doc.colour,       toStr(liveV.colour)),
+            exteriorFinish: fill(doc.exteriorFinish, toStr(liveV.exteriorFinish)),
+            drivetrain:   fill(doc.drivetrain,   toStr(liveV.drivetrain)),
+            year:         fill(doc.year,         liveV.yearOfManufacture ? String(liveV.yearOfManufacture) : ''),
+            doors:        fill(doc.doors,        liveV.doors ?? undefined),
+            seats:        fill(doc.seats,        liveV.seats ?? undefined),
+            mileage:      fill(doc.mileage,      liveV.odometerReadingMiles ?? undefined),
+            engineSize:   fill(doc.engineSize,   liveV.engineSizeCc ? String(liveV.engineSizeCc) : (liveV.badgeEngineSizeLitres ? String(liveV.badgeEngineSizeLitres) : '')),
+            vin:          fill(doc.vin,          liveV.vin || ''),
+            dateOfRegistration: fill(doc.dateOfRegistration, liveV.firstRegistrationDate || ''),
+            previousOwners: fill(doc.previousOwners, liveV.previousOwners ?? undefined),
+            serviceHistory: fill(doc.serviceHistory, liveV.serviceHistory || ''),
+            // Always use AT as source of truth for adverts, features, and full technicalSpecs
+            adverts:      live.adverts ?? doc.adverts,
+            features:     Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
         };
     } catch {
