@@ -87,10 +87,12 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             dateOfRegistration: fill(doc.dateOfRegistration, liveV.firstRegistrationDate || ''),
             previousOwners: fill(doc.previousOwners, liveV.previousOwners ?? undefined),
             serviceHistory: fill(doc.serviceHistory, liveV.serviceHistory || ''),
-            // Always use AT as source of truth for adverts, features, and full technicalSpecs
+            // Always use AT as source of truth for adverts, features, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
             features:     Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
+            // AT media is source of truth — exposes full href with correct CDN host for the Images tab
+            media:    live.media ?? doc.media,
             // Fill imageIds from AT media when local doc has none
             imageIds: (doc.imageIds && doc.imageIds.length > 0)
                 ? doc.imageIds
