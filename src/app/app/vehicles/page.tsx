@@ -218,6 +218,15 @@ function VehiclesContent() {
 
     useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
 
+    // Silent background AT sync on every page load — keeps both environments in sync with AT
+    useEffect(() => {
+        fetch('/api/vehicles/autotrader-stock', { method: 'GET' })
+            .then(r => r.json())
+            .then(data => { if (data.ok !== false) fetchVehicles(); })
+            .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const handleUpdateVehicle = async (id: string, updates: Partial<VehicleItem>) => {
         setVehicles(prev => prev.map(v => v._id === id ? { ...v, ...updates } : v));
         try {
