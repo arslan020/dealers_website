@@ -3701,9 +3701,9 @@ function OptionsTab({
                                     </div>
                                     {/* Items — 2-col grid */}
                                     <div className="grid grid-cols-2 divide-x divide-[#F1F5F9]">
-                                        {groupItems.map((item) => (
+                                        {groupItems.filter((item, idx, arr) => arr.findIndex(i => i.label === item.label) === idx).map((item, idx) => (
                                             <label
-                                                key={item.label}
+                                                key={`${item.label}-${idx}`}
                                                 className="flex items-center justify-between px-5 py-2.5 cursor-pointer hover:bg-blue-50/40 transition-colors border-b border-[#F1F5F9]"
                                             >
                                                 <div className="flex items-center gap-3 min-w-0">
@@ -3800,8 +3800,8 @@ function OptionsTab({
                                     <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{group.name}</span>
                                 </div>
                                 <div className="grid grid-cols-2 divide-x divide-[#F1F5F9]">
-                                    {group.items.map((item) => (
-                                        <div key={item} className="flex items-center gap-3 px-5 py-2.5 border-b border-[#F1F5F9]">
+                                    {[...new Set(group.items)].map((item, idx) => (
+                                        <div key={`${item}-${idx}`} className="flex items-center gap-3 px-5 py-2.5 border-b border-[#F1F5F9]">
                                             <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border bg-[#4D7CFF] border-[#4D7CFF]">
                                                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
                                                     <path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
