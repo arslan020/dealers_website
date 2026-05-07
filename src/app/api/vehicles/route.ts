@@ -840,11 +840,18 @@ async function updateVehicle(req: NextRequest) {
     }
 
     // 6. Sync features list (full replacement as per AT docs)
+    // Combine features + customFeatures (same as create payload) and include factoryFitted flag
     if (vehicle.stockId && updateData.features !== undefined) {
         try {
-            const featuresPayload = Array.isArray(updateData.features)
-                ? updateData.features.map((f: any) => (typeof f === 'string' ? { name: f } : f))
-                : [];
+            const allNames = [
+                ...(Array.isArray(updateData.features) ? updateData.features : []),
+                ...(Array.isArray(updateData.customFeatures ?? vehicle.customFeatures) ? (updateData.customFeatures ?? vehicle.customFeatures) : []),
+            ];
+            const ffSet = new Set<string>(Array.isArray(updateData.factoryFittedFeatures ?? vehicle.factoryFittedFeatures) ? (updateData.factoryFittedFeatures ?? vehicle.factoryFittedFeatures) : []);
+            const featuresPayload = allNames.map((f: any) => {
+                const name = typeof f === 'string' ? f : (f.name || '');
+                return ffSet.has(name) ? { name, factoryFitted: true } : { name };
+            });
             await client.updateStock(vehicle.stockId, { features: featuresPayload });
             console.log(`[AutoTrader] Features synced: ${featuresPayload.length} items`);
         } catch (atError) {

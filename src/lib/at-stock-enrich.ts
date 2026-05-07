@@ -91,9 +91,13 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             dateOfRegistration: atWins(liveV.firstRegistrationDate || '', doc.dateOfRegistration),
             previousOwners: liveV.owners ?? liveV.previousOwners ?? doc.previousOwners,
             serviceHistory: atWins(liveV.serviceHistory || '', doc.serviceHistory),
-            // Always use AT as source of truth for adverts, features, media and full technicalSpecs
+            // Always use AT as source of truth for adverts, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
-            features:     Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
+            // Local doc features preserve exact names used for checkbox matching.
+            // AT may return normalized/different names — use local as ground truth, fall back to AT.
+            features: (doc.features && doc.features.length > 0)
+                ? doc.features
+                : (Array.isArray(live.features) ? live.features.map((f: any) => typeof f === 'string' ? f : (f.name || '')).filter(Boolean) : []),
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
             // AT media is source of truth — exposes full href with correct CDN host for the Images tab
             media:    live.media ?? doc.media,
