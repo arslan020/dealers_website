@@ -51,7 +51,7 @@ export async function GET(
                 };
                 vehicle = {
                     id: live.id || live.stockId || id,
-                    vrm: toStr(live.vehicle?.vrm || live.vehicle?.registrationNumber),
+                    vrm: toStr(live.vehicle?.registration || live.vehicle?.vrm || live.vehicle?.registrationNumber),
                     make: toStr(live.vehicle?.make),
                     model: toStr(live.vehicle?.model),
                     derivative: toStr(live.vehicle?.derivative),
