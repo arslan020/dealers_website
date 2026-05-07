@@ -91,6 +91,10 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             adverts:      live.adverts ?? doc.adverts,
             features:     Array.isArray(live.features) && live.features.length > 0 ? live.features : doc.features,
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
+            // Fill imageIds from AT media when local doc has none
+            imageIds: (doc.imageIds && doc.imageIds.length > 0)
+                ? doc.imageIds
+                : (live.media?.images || []).map((img: any) => img.imageId).filter(Boolean),
         };
     } catch {
         return doc;
