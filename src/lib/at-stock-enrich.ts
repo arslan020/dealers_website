@@ -85,7 +85,7 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             doors:        liveV.doors ?? doc.doors,
             seats:        liveV.seats ?? doc.seats,
             mileage:      liveV.odometerReadingMiles ?? doc.mileage,
-            price:        live.adverts?.forecourtPrice?.amountGBP ?? live.adverts?.retailAdverts?.suppliedPrice?.amountGBP ?? doc.price,
+            price:        fill(doc.price, live.adverts?.forecourtPrice?.amountGBP ?? live.adverts?.retailAdverts?.suppliedPrice?.amountGBP),
             engineSize:   atWins(liveV.engineCapacityCC ? String(Math.round(liveV.engineCapacityCC / 1000 * 10) / 10) : (liveV.engineSizeCc ? String(liveV.engineSizeCc) : (liveV.badgeEngineSizeLitres ? String(liveV.badgeEngineSizeLitres) : '')), doc.engineSize),
             vin:          atWins(liveV.vin || '',           doc.vin),
             dateOfRegistration: atWins(liveV.firstRegistrationDate || '', doc.dateOfRegistration),
