@@ -93,11 +93,15 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             serviceHistory: atWins(liveV.serviceHistory || '', doc.serviceHistory),
             // Always use AT as source of truth for adverts, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
-            // Local doc features preserve exact names used for checkbox matching.
-            // AT may return normalized/different names — use local as ground truth, fall back to AT.
-            features: (doc.features && doc.features.length > 0)
-                ? doc.features
-                : (Array.isArray(live.features) ? live.features.map((f: any) => typeof f === 'string' ? f : (f.name || '')).filter(Boolean) : []),
+            // Use AT features if AT has more (features added on another env or AT dashboard).
+            // Otherwise keep local as ground truth (preserves exact checkbox-matched names).
+            features: (() => {
+                const localFeats: string[] = Array.isArray(doc.features) ? doc.features : [];
+                const atFeats: string[] = Array.isArray(live.features)
+                    ? live.features.map((f: any) => typeof f === 'string' ? f : (f.name || '')).filter(Boolean)
+                    : [];
+                return atFeats.length > localFeats.length ? atFeats : (localFeats.length > 0 ? localFeats : atFeats);
+            })(),
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
             // AT media is source of truth — exposes full href with correct CDN host for the Images tab
             media:    live.media ?? doc.media,
