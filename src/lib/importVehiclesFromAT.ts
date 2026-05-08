@@ -191,6 +191,9 @@ export async function importVehiclesFromAT(tenantId: string): Promise<{ imported
             v5Present:        veh.v5Certificate    ?? undefined,
             exDemo:           veh.exDemo           ?? undefined,
             wheelchairAccessible: veh.wheelchairAccessible ?? undefined,
+            dateOfLastService:   veh.lastServiceDate                    || undefined,
+            mileageAtLastService: veh.lastServiceOdometerReadingMiles   ?? undefined,
+            condition:           veh.ownershipCondition === 'New' ? 'New' : (veh.ownershipCondition ? 'Used' : undefined),
             // ── Condition ────────────────────────────────────────────────────
             ...(interiorCondition  && { interiorCondition }),
             ...(tyreCondition      && { tyreCondition }),

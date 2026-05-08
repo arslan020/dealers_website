@@ -91,6 +91,9 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             dateOfRegistration: atWins(liveV.firstRegistrationDate || '', doc.dateOfRegistration),
             previousOwners: liveV.owners ?? liveV.previousOwners ?? doc.previousOwners,
             serviceHistory: atWins(liveV.serviceHistory || '', doc.serviceHistory),
+            dateOfLastService:    fill(doc.dateOfLastService,    liveV.lastServiceDate || ''),
+            mileageAtLastService: fill(doc.mileageAtLastService, liveV.lastServiceOdometerReadingMiles),
+            condition: fill(doc.condition, liveV.ownershipCondition === 'New' ? 'New' : (liveV.ownershipCondition ? 'Used' : '')),
             // Always use AT as source of truth for adverts, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
             // AT is source of truth for features — always use AT when available.
