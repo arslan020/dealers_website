@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Vehicle from '@/models/Vehicle';
 import { withErrorHandler } from '@/lib/api-handler';
@@ -642,6 +642,9 @@ async function updateVehicle(req: NextRequest) {
     // 2b. Sync advert-level availability/settings fields
     if (vehicle.stockId) {
         const atAdverts: Record<string, any> = {};
+        const atRetailAdverts: Record<string, any> = {};
+
+        // Existing fields
         if (updateData.includes12MonthsMot !== undefined) atAdverts.twelveMonthsMot = updateData.includes12MonthsMot;
         if (updateData.includesMotInsurance !== undefined) atAdverts.motInsurance = updateData.includesMotInsurance;
         if (updateData.dueInDate !== undefined) atAdverts.dueDate = updateData.dueInDate || null;
@@ -649,6 +652,21 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.vatStatus !== undefined) {
             atAdverts.vatScheme = updateData.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal';
         }
+
+        // ── NEW: additional advert-level fields ───────────────────────────────
+        // Dealer internal fields (not shown to consumers on AT)
+        if (updateData.purchasePrice !== undefined)          atAdverts.purchasePrice          = { amountGBP: Number(updateData.purchasePrice) || null };
+        if (updateData.preparationCosts !== undefined)       atAdverts.preparationCosts       = { amountGBP: Number(updateData.preparationCosts) || null };
+        if (updateData.soldDate !== undefined)               atAdverts.soldDate               = updateData.soldDate || null;
+        if (updateData.soldPrice !== undefined)              atAdverts.soldPrice              = { amountGBP: Number(updateData.soldPrice) || null };
+        if (updateData.manufacturerApproved !== undefined)   atAdverts.manufacturerApproved   = Boolean(updateData.manufacturerApproved);
+        // forecourtPriceVatStatus: Inc VAT | No VAT | Ex VAT (for LCVs)
+        if (updateData.forecourtPriceVatStatus !== undefined) atAdverts.forecourtPriceVatStatus = updateData.forecourtPriceVatStatus || null;
+        // adminFee: mandatory per-vehicle fee (goes inside retailAdverts)
+        if (updateData.adminFee !== undefined)               atRetailAdverts.adminFee         = { amountGBP: Number(updateData.adminFee) || null };
+
+        if (Object.keys(atRetailAdverts).length > 0) atAdverts.retailAdverts = atRetailAdverts;
+
         if (Object.keys(atAdverts).length > 0) {
             try {
                 await client.updateStock(vehicle.stockId, { adverts: atAdverts });
@@ -756,32 +774,102 @@ async function updateVehicle(req: NextRequest) {
             fuelType:             'fuelType',
             transmission:         'transmissionType',
             bodyType:             'bodyType',
-            // Note: make, model, derivative, generation are read-only on AT â€” derived from derivativeId
-            // Only these direct vehicle fields are safely patchable per AT docs
+            // Note: make, model, derivative, generation are read-only on AT - derived from derivativeId
             year:                 'yearOfManufacture',
             vin:                  'vin',
             doors:                'doors',
             seats:                'seats',
-            // â”€â”€ Newly synced fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             engineNumber:         'engineNumber',
             plate:                'plate',
             emissionClass:        'emissionClass',
             co2EmissionGPKM:      'co2EmissionGPKM',
             exteriorFinish:       'exteriorFinish',
             wheelchairAccessible: 'wheelchairAccessible',
+            // Engine / Performance
+            enginePowerBHP:               'enginePowerBHP',
+            enginePowerPS:                'enginePowerPS',
+            engineTorqueNM:               'engineTorqueNM',
+            engineTorqueLBFT:             'engineTorqueLBFT',
+            cylinders:                    'cylinders',
+            valves:                       'valves',
+            boreMM:                       'boreMM',
+            strokeMM:                     'strokeMM',
+            fuelCapacityLitres:           'fuelCapacityLitres',
+            fuelDelivery:                 'fuelDelivery',
+            gears:                        'gears',
+            startStop:                    'startStop',
+            topSpeedMPH:                  'topSpeedMPH',
+            zeroToSixtyMPHSeconds:        'zeroToSixtyMPHSeconds',
+            zeroToOneHundredKMPHSeconds:  'zeroToOneHundredKMPHSeconds',
+            // EV
+            batteryRangeMiles:            'batteryRangeMiles',
+            batteryCapacityKWH:           'batteryCapacityKWH',
+            batteryUsableCapacityKWH:     'batteryUsableCapacityKWH',
+            batteryChargeTime:            'batteryChargeTime',
+            batteryHealth:                'batteryHealth',
+            // Fuel Economy
+            fuelEconomyNEDCExtraUrbanMPG: 'fuelEconomyNEDCExtraUrbanMPG',
+            fuelEconomyNEDCUrbanMPG:      'fuelEconomyNEDCUrbanMPG',
+            fuelEconomyNEDCCombinedMPG:   'fuelEconomyNEDCCombinedMPG',
+            fuelEconomyWLTPLowMPG:        'fuelEconomyWLTPLowMPG',
+            fuelEconomyWLTPMediumMPG:     'fuelEconomyWLTPMediumMPG',
+            fuelEconomyWLTPHighMPG:       'fuelEconomyWLTPHighMPG',
+            fuelEconomyWLTPExtraHighMPG:  'fuelEconomyWLTPExtraHighMPG',
+            fuelEconomyWLTPCombinedMPG:   'fuelEconomyWLTPCombinedMPG',
+            // Dimensions / Weight
+            lengthMM:                     'lengthMM',
+            heightMM:                     'heightMM',
+            widthMM:                      'widthMM',
+            wheelbaseMM:                  'wheelbaseMM',
+            minimumKerbWeightKG:          'minimumKerbWeightKG',
+            grossVehicleWeightKG:         'grossVehicleWeightKG',
+            bootSpaceSeatsUpLitres:       'bootSpaceSeatsUpLitres',
+            bootSpaceSeatsDownLitres:     'bootSpaceSeatsDownLitres',
+            // Insurance
+            insuranceGroup:               'insuranceGroup',
+            insuranceSecurityCode:        'insuranceSecurityCode',
+            // Interior
+            interiorUpholstery:           'upholstery',
+            interiorColour:               'interiorColour',
+            // Compliance
+            ulezCompliant:                'ulezCompliant',
+            rde2:                         'rde2',
+            countryOfOrigin:              'countryOfOrigin',
+            // Van / Truck
+            cabType:                      'cabType',
+            wheelbaseType:                'wheelbaseType',
+            roofHeightType:               'roofHeightType',
+            payloadLengthMM:              'payloadLengthMM',
+            payloadHeightMM:              'payloadHeightMM',
+            payloadWidthMM:               'payloadWidthMM',
+            payloadWeightKG:              'payloadWeightKG',
         };
+
+        // Type-coercion sets
+        const numericVehicleFields = new Set([
+            'mileage','doors','seats','enginePowerBHP','enginePowerPS','engineTorqueNM','engineTorqueLBFT',
+            'cylinders','valves','boreMM','strokeMM','fuelCapacityLitres','gears','topSpeedMPH',
+            'zeroToSixtyMPHSeconds','zeroToOneHundredKMPHSeconds','batteryRangeMiles','batteryCapacityKWH',
+            'batteryUsableCapacityKWH','batteryHealth','co2EmissionGPKM',
+            'fuelEconomyNEDCExtraUrbanMPG','fuelEconomyNEDCUrbanMPG','fuelEconomyNEDCCombinedMPG',
+            'fuelEconomyWLTPLowMPG','fuelEconomyWLTPMediumMPG','fuelEconomyWLTPHighMPG',
+            'fuelEconomyWLTPExtraHighMPG','fuelEconomyWLTPCombinedMPG',
+            'lengthMM','heightMM','widthMM','wheelbaseMM','minimumKerbWeightKG','grossVehicleWeightKG',
+            'bootSpaceSeatsUpLitres','bootSpaceSeatsDownLitres',
+            'payloadLengthMM','payloadHeightMM','payloadWidthMM','payloadWeightKG',
+        ]);
+        const booleanVehicleFields = new Set(['startStop','wheelchairAccessible','ulezCompliant','rde2']);
+        const stringVehicleFields  = new Set(['year','plate']);
 
         const vehicleUpdate: Record<string, any> = {};
         for (const [localKey, atKey] of Object.entries(vehicleFieldMap)) {
             const val = updateData[localKey];
             if (val === undefined) continue;
-            // AT rejects empty strings — send null to clear, skip if no meaningful value
-            if (val === '') continue;
-            vehicleUpdate[atKey] = localKey === 'mileage'
-                ? Number(val)
-                : localKey === 'year' || localKey === 'plate'
-                ? String(val)
-                : val;
+            if (val === '')                           { vehicleUpdate[atKey] = null; continue; }
+            if (numericVehicleFields.has(localKey))  { vehicleUpdate[atKey] = Number(val); continue; }
+            if (booleanVehicleFields.has(localKey))  { vehicleUpdate[atKey] = Boolean(val); continue; }
+            if (stringVehicleFields.has(localKey))   { vehicleUpdate[atKey] = String(val); continue; }
+            vehicleUpdate[atKey] = val;
         }
 
         // Fields that require value transformation before sending to AT
@@ -791,7 +879,18 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.numberOfKeys !== undefined)           vehicleUpdate.keys                    = Number(updateData.numberOfKeys);
         if (updateData.v5Present !== undefined)              vehicleUpdate.v5Certificate           = updateData.v5Present;
         if (updateData.exDemo !== undefined)                 vehicleUpdate.exDemo                  = updateData.exDemo;
-        if (updateData.manufacturerWarrantyMonths !== undefined) vehicleUpdate.warrantyMonthsOnPurchase = Number(updateData.manufacturerWarrantyMonths);
+        if (updateData.manufacturerWarrantyMonths !== undefined) vehicleUpdate.warrantyMonthsOnPurchase        = Number(updateData.manufacturerWarrantyMonths);
+        // Service history detail (update sync - was missing before)
+        if (updateData.mileageAtLastService !== undefined)       vehicleUpdate.lastServiceOdometerReadingMiles = Number(updateData.mileageAtLastService) || null;
+        if (updateData.dateOfLastService !== undefined)          vehicleUpdate.lastServiceDate                = updateData.dateOfLastService || null;
+        // Registration date - AT requires full YYYY-MM-DD
+        if (updateData.dateOfRegistration !== undefined && /^\d{4}-\d{2}-\d{2}/.test(String(updateData.dateOfRegistration || ''))) {
+            vehicleUpdate.firstRegistrationDate = updateData.dateOfRegistration;
+        }
+        // Driver position - only send LHD; RHD is AT default (blank)
+        if (updateData.driverPosition !== undefined) {
+            vehicleUpdate.driverPosition = String(updateData.driverPosition || '').toLowerCase().includes('left') ? 'Left Hand Drive' : null;
+        }
         // Origin: 'UK Vehicle' â†’ 'UK', 'Import' â†’ 'Non UK'
         if (updateData.origin !== undefined)                 vehicleUpdate.origin                  = AT_ORIGIN_MAP[updateData.origin] ?? updateData.origin;
         // Conditions: 'Fair' â†’ 'Average' (AT doesn't accept 'Fair')
@@ -908,7 +1007,47 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 8. Update local AutoTraderStockCache immediately to prevent stale data on refresh
+    // 7b. Sync media video and spin - on every save that touches these fields
+    if (vehicle.stockId) {
+        const mediaUpdate: Record<string, any> = {};
+        if (updateData.youtubeVideoIds !== undefined) {
+            const firstVideoId = Array.isArray(updateData.youtubeVideoIds) ? updateData.youtubeVideoIds[0] : null;
+            mediaUpdate.video = firstVideoId ? { href: 'https://www.youtube.com/watch?v=' + firstVideoId } : { href: null };
+        }
+        if (updateData.spinUrl !== undefined) {
+            mediaUpdate.spin = updateData.spinUrl ? { href: updateData.spinUrl } : { href: null };
+        }
+        if (Object.keys(mediaUpdate).length > 0) {
+            try {
+                await client.updateStock(vehicle.stockId, { media: mediaUpdate });
+                console.log('[AutoTrader] Media video/spin synced:', Object.keys(mediaUpdate));
+            } catch (atError) {
+                console.error('[AutoTrader Media Video/Spin Sync Error]', atError);
+            }
+        }
+    }
+
+    // 7c. Sync displayOptions (excludeFromAdvert) - controls what is hidden on the AT consumer advert
+    if (vehicle.stockId && updateData.excludeFromAdvert !== undefined) {
+        const exFromAdvert = updateData.excludeFromAdvert || {};
+        try {
+            const displayOptions = {
+                excludePreviousOwners:  Boolean(exFromAdvert.previousOwners),
+                excludeStrapline:       Boolean(exFromAdvert.attentionGrabber),
+                excludeMot:             Boolean(exFromAdvert.mot),
+                excludeWarranty:        Boolean(exFromAdvert.warranty),
+                excludeInteriorDetails: Boolean(exFromAdvert.interiorCondition),
+                excludeTyreCondition:   Boolean(exFromAdvert.tyreCondition),
+                excludeBodyCondition:   Boolean(exFromAdvert.exteriorCondition),
+            };
+            await client.updateStock(vehicle.stockId, { adverts: { retailAdverts: { displayOptions } } });
+            console.log('[AutoTrader] displayOptions synced');
+        } catch (atError) {
+            console.error('[AutoTrader displayOptions Sync Error]', atError);
+        }
+    }
+
+        // 8. Update local AutoTraderStockCache immediately to prevent stale data on refresh
     if (vehicle.stockId) {
         try {
             const cacheDoc = await AutoTraderStockCache.findOne({ tenantId });
