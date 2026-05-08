@@ -4827,6 +4827,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                         keyTags: vehicleData.keyTags || '',
                         serviceHistory: vehicleData.serviceHistory || 'Full',
                         previousOwners: vehicleData.history?.previousOwners || vehicleData.previousOwners || 1,
+                        dateOfRegistration: vehicleData.dateOfRegistration || '',
                     });
                     setEditDescription(vehicleData.description || '');
                     setEditDescription2(vehicleData.description2 || '');
@@ -5864,8 +5865,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                             <FieldLabel>Date First Registered</FieldLabel>
                                             <input
                                                 type="date"
-                                                value={(editFields as any).dateFirstRegistered || ''}
-                                                onChange={(e) => updateField('dateFirstRegistered' as any, e.target.value)}
+                                                value={(editFields as any).dateOfRegistration || ''}
+                                                onChange={(e) => updateField('dateOfRegistration' as any, e.target.value)}
                                                 className="w-full px-3 py-2 bg-white border border-[#E2E8F0] rounded-md text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#4D7CFF] focus:ring-1 focus:ring-[#4D7CFF] transition-colors shadow-sm uppercase"
                                             />
                                         </div>
