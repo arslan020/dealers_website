@@ -153,14 +153,37 @@ async function getVehicles(req: NextRequest) {
                 if (!local.stockId && atv.id) {
                     Vehicle.findByIdAndUpdate(local._id, { $set: { stockId: atv.id } }).catch(() => {});
                 }
+
+                // Heal fields that are empty in local DB but present in AT cache
+                const healSet: Record<string, any> = {};
+                const atMileage = atv.vehicle?.odometerReadingMiles ?? atv.mileage;
+                if (!local.mileage && atMileage) healSet.mileage = atMileage;
+                if (!local.colour || local.colour === '') { const v = atStr(atv.vehicle?.colour || atv.colour); if (v) healSet.colour = v; }
+                if (!local.fuelType || local.fuelType === '') { const v = atStr(atv.vehicle?.fuelType || atv.fuelType); if (v) healSet.fuelType = v; }
+                if (!local.transmission || local.transmission === '') { const v = atStr(atv.vehicle?.transmissionType || atv.transmission); if (v) healSet.transmission = v; }
+                if (!local.bodyType || local.bodyType === '') { const v = atStr(atv.vehicle?.bodyType || atv.bodyType); if (v) healSet.bodyType = v; }
+                if (!local.year || local.year === '') { const v = atv.vehicle?.yearOfManufacture || atv.year; if (v) healSet.year = String(v); }
+                if (!local.doors && atv.vehicle?.doors) healSet.doors = atv.vehicle.doors;
+                if (!local.seats && atv.vehicle?.seats) healSet.seats = atv.vehicle.seats;
+                if ((!local.price || local.price === 0) && (atv.adverts?.retailAdverts?.suppliedPrice?.amountGBP || atv.price)) {
+                    healSet.price = atv.adverts?.retailAdverts?.suppliedPrice?.amountGBP || atv.price;
+                }
+                if (!local.make || local.make === 'Unknown') { if (atv.make) healSet.make = atv.make; }
+                if (!local.model || local.model === 'Unknown') { if (atv.model) healSet.model = atv.model; }
+                if (!local.vrm || local.vrm === 'PENDING') { if (atv.vrm) healSet.vrm = atv.vrm; }
+                if (!local.derivative || local.derivative === '') { const v = atStr(atv.derivative || atv.vehicle?.derivative); if (v) healSet.derivative = v; }
+                if (!local.vin || local.vin === '') { const v = atv.vehicle?.vin || ''; if (v) healSet.vin = v; }
+                if (!local.dateOfRegistration || local.dateOfRegistration === '') { const v = atv.vehicle?.firstRegistrationDate || ''; if (v) healSet.dateOfRegistration = v; }
+
+                if (Object.keys(healSet).length > 0 && local._id) {
+                    Vehicle.findByIdAndUpdate(local._id, { $set: healSet }).catch(() => {});
+                }
+
                 mergedList[index] = {
                     ...local,
+                    ...healSet,
                     status: statusFromAT,  // AT is source of truth
                     stockId: atv.id,
-                    // Heal stale 'Unknown' make/model from AT data
-                    make: local.make === 'Unknown' ? atv.make : local.make,
-                    model: local.model === 'Unknown' ? atv.model : local.model,
-                    vrm: local.vrm === 'PENDING' ? atv.vrm : local.vrm,
                     // Only use AT images if local DB has no saved images
                     primaryImage: hasSavedImages ? local.primaryImage : atv.primaryImage,
                     imagesCount: hasSavedImages ? (local.imagesCount || 0) : (atv.images?.length || 0),
@@ -190,8 +213,20 @@ async function getVehicles(req: NextRequest) {
                     atv.vrm?.toLowerCase().includes(search);
                 if (filterMatches && matchesSearch) {
                     const hasSavedImages = localRecordAny.primaryImage && localRecordAny.primaryImage !== '';
+                    const healAny: Record<string, any> = {};
+                    const atMileageAny = atv.vehicle?.odometerReadingMiles ?? atv.mileage;
+                    if (!localRecordAny.mileage && atMileageAny) healAny.mileage = atMileageAny;
+                    if (!localRecordAny.colour || localRecordAny.colour === '') { const v = atStr(atv.vehicle?.colour || atv.colour); if (v) healAny.colour = v; }
+                    if (!localRecordAny.fuelType || localRecordAny.fuelType === '') { const v = atStr(atv.vehicle?.fuelType || atv.fuelType); if (v) healAny.fuelType = v; }
+                    if (!localRecordAny.transmission || localRecordAny.transmission === '') { const v = atStr(atv.vehicle?.transmissionType || atv.transmission); if (v) healAny.transmission = v; }
+                    if (!localRecordAny.bodyType || localRecordAny.bodyType === '') { const v = atStr(atv.vehicle?.bodyType || atv.bodyType); if (v) healAny.bodyType = v; }
+                    if (!localRecordAny.year || localRecordAny.year === '') { const v = atv.vehicle?.yearOfManufacture || atv.year; if (v) healAny.year = String(v); }
+                    if (Object.keys(healAny).length > 0 && localRecordAny._id) {
+                        Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: healAny }).catch(() => {});
+                    }
                     mergedList.push({
                         ...localRecordAny,
+                        ...healAny,
                         status: statusFromAT,
                         stockId: atv.id,
                         primaryImage: hasSavedImages ? localRecordAny.primaryImage : atv.primaryImage,
@@ -222,7 +257,15 @@ async function getVehicles(req: NextRequest) {
                             model: atv.model,
                             derivative: atv.derivative,
                             vrm: atv.vrm,
-                            price: atv.price,
+                            price: atv.price || atv.adverts?.retailAdverts?.suppliedPrice?.amountGBP || 0,
+                            mileage: atv.vehicle?.odometerReadingMiles ?? atv.mileage ?? 0,
+                            colour: atStr(atv.vehicle?.colour || atv.colour),
+                            fuelType: atStr(atv.vehicle?.fuelType || atv.fuelType),
+                            transmission: atStr(atv.vehicle?.transmissionType || atv.transmission),
+                            bodyType: atStr(atv.vehicle?.bodyType || atv.bodyType),
+                            year: atv.vehicle?.yearOfManufacture ? String(atv.vehicle.yearOfManufacture) : (atv.year || ''),
+                            doors: atv.vehicle?.doors,
+                            seats: atv.vehicle?.seats,
                             status: atVehicleStatus,
                             primaryImage: atv.primaryImage,
                             imagesCount: atv.images?.length || 0,
