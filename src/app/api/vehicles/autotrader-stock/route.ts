@@ -122,13 +122,18 @@ async function getAutoTraderStock(req: NextRequest) {
 
             console.log(`[AutoTrader] Fresh stock fetched for tenant ${tenantObjectId}. ${allStock.length} vehicles.`);
 
-            // Remove local DB vehicles whose stockId is no longer on AT (deleted from AT)
-            const activeAtStockIds = Array.from(new Set(allStock.map((v: any) => v.id).filter(Boolean)));
-            if (activeAtStockIds.length > 0) {
-                Vehicle.deleteMany({
-                    tenantId: tenantObjectId,
-                    stockId: { $exists: true, $ne: null, $nin: activeAtStockIds },
-                }).catch(() => {});
+            // Only mark local vehicles as Deleted if AT explicitly says lifecycleState is DELETED or WASTEBIN.
+            // AT docs: stock updates take time to propagate — never delete based on absence from list
+            // (a newly created vehicle may not appear in the list immediately).
+            const deletedOnAT = allStock
+                .filter((v: any) => v.metadata?.lifecycleState === 'DELETED' || v.metadata?.lifecycleState === 'WASTEBIN')
+                .map((v: any) => v.id)
+                .filter(Boolean);
+            if (deletedOnAT.length > 0) {
+                Vehicle.updateMany(
+                    { tenantId: tenantObjectId, stockId: { $in: deletedOnAT }, status: { $nin: ['Deleted'] } },
+                    { $set: { status: 'Deleted' } }
+                ).catch(() => {});
             }
         } catch (error: any) {
             // If fresh fetch fails but we have stale cache, serve it anyway
