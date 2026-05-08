@@ -706,6 +706,29 @@ async function updateVehicle(req: NextRequest) {
                 });
                 console.log(`[AutoTrader] Lifecycle updated to ${lifecycleState}`);
 
+                // Immediately update the AT cache so the vehicle list shows the correct
+                // status without waiting for the 60-second cache TTL to expire.
+                // Without this, the stale FORECOURT state in cache overwrites local DB status.
+                try {
+                    const cacheDoc = await AutoTraderStockCache.findOne({ tenantId });
+                    if (cacheDoc?.stock) {
+                        const cacheIdx = cacheDoc.stock.findIndex((s: any) => s.id === vehicle.stockId);
+                        if (cacheIdx !== -1) {
+                            cacheDoc.stock[cacheIdx].metadata = {
+                                ...(cacheDoc.stock[cacheIdx].metadata || {}),
+                                lifecycleState,
+                            };
+                            cacheDoc.stock[cacheIdx].status = updateData.status;
+                            await AutoTraderStockCache.updateOne(
+                                { tenantId },
+                                { $set: { stock: cacheDoc.stock } }
+                            );
+                        }
+                    }
+                } catch (cacheErr) {
+                    console.error('[AT Cache] Failed to update lifecycle in cache:', cacheErr);
+                }
+
                 // When moved to In Stock (FORECOURT), publish the AT advert
                 if (lifecycleState === 'FORECOURT') {
                     await client.updateStockAdvertiseStatus(vehicle.stockId, 'autotrader', 'PUBLISHED');

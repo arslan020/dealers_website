@@ -295,11 +295,16 @@ export async function POST(req: NextRequest) {
             ? 'DUE_IN'
             : 'FORECOURT';
 
-        // features: combine standard + custom, send as [{name}] objects (AT docs requirement)
-        const allFeatures = [
+        // features: standard (all) + optional selected + custom, with factoryFitted flag
+        const allFeatureNames = [
+            ...(vehicle.standardFeatures || []),
             ...(vehicle.features || []),
             ...(vehicle.customFeatures || []),
-        ].map((name: string) => ({ name }));
+        ];
+        const factoryFittedSet = new Set<string>(vehicle.factoryFittedFeatures || []);
+        const allFeatures = allFeatureNames.map((name: string) =>
+            factoryFittedSet.has(name) ? { name, factoryFitted: true } : { name }
+        );
 
         // media.images: AT requires [{imageId}] — use locally stored AT imageIds
         const mediaImages = (vehicle.imageIds || []).map((imageId: string) => ({ imageId }));
