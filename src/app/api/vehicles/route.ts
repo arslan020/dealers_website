@@ -385,7 +385,9 @@ function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = f
         },
         ...(featuresPayload && { features: featuresPayload }),
         metadata: {
-            lifecycleState: 'FORECOURT',
+            // AT docs: DUE_IN = vehicle not yet ready for sale (our Draft state)
+            // FORECOURT = vehicle ready for sale (our In Stock state)
+            lifecycleState: isDraft ? 'DUE_IN' : 'FORECOURT',
             externalStockId: mongoId,
         },
     };
@@ -683,41 +685,35 @@ async function updateVehicle(req: NextRequest) {
             'Sold':             'SOLD',
             'In Stock':         'FORECOURT',
             'Due In':           'DUE_IN',
+            'Draft':            'DUE_IN',           // AT docs: DUE_IN = not yet ready for sale
             'Sale In Progress': 'SALE_IN_PROGRESS',
-            'Reserved':         'SALE_IN_PROGRESS', // Reserved on AutoDesk = Sale In Progress on AT
+            'Reserved':         'SALE_IN_PROGRESS',
             'Wastebin':         'WASTEBIN',
             'Deleted':          'DELETED',
-            'Draft':            'LOCAL_DRAFT',      // Special case: just unpublish
         };
         const lifecycleState = lifecycleMap[updateData.status];
         if (lifecycleState) {
             try {
-                if (lifecycleState === 'LOCAL_DRAFT') {
-                    // For Draft, we don't send a fake lifecycleState to AT, we just take down the adverts
+                // SOLD, WASTEBIN, DELETED require all channels unpublished first (AT docs requirement)
+                // DUE_IN (Draft) also requires unpublish — vehicle should not be visible
+                if (['SOLD', 'WASTEBIN', 'DELETED', 'DUE_IN'].includes(lifecycleState)) {
                     await client.unpublishAll(vehicle.stockId);
-                    console.log(`[AutoTrader] Vehicle moved to Draft. Unpublished all channels for stock ${vehicle.stockId}`);
-                } else {
-                    // SOLD, WASTEBIN, DELETED all require channels unpublished first
-                    if (['SOLD', 'WASTEBIN', 'DELETED'].includes(lifecycleState)) {
-                        await client.unpublishAll(vehicle.stockId);
-                        console.log(`[AutoTrader] Prerequisite: All channels unpublished for stock ${vehicle.stockId}`);
-                    }
+                    console.log(`[AutoTrader] All channels unpublished for stock ${vehicle.stockId}`);
+                }
 
-                    await client.updateStock(vehicle.stockId, {
-                        metadata: { lifecycleState }
-                    });
-                    console.log(`[AutoTrader] Lifecycle updated to ${lifecycleState}`);
+                await client.updateStock(vehicle.stockId, {
+                    metadata: { lifecycleState }
+                });
+                console.log(`[AutoTrader] Lifecycle updated to ${lifecycleState}`);
 
-                    // Ensure "In Stock" vehicles become live again on AutoTrader
-                    // after being moved from Draft/Sold/Reserved states.
-                    if (lifecycleState === 'FORECOURT') {
-                        await client.updateStockAdvertiseStatus(vehicle.stockId, 'autotrader', 'PUBLISHED');
-                        await Vehicle.updateOne(
-                            { _id: vehicle._id, tenantId },
-                            { $set: { atAdvertStatus: 'PUBLISHED' } }
-                        );
-                        console.log(`[AutoTrader] Autotrader advert published for stock ${vehicle.stockId}`);
-                    }
+                // When moved to In Stock (FORECOURT), publish the AT advert
+                if (lifecycleState === 'FORECOURT') {
+                    await client.updateStockAdvertiseStatus(vehicle.stockId, 'autotrader', 'PUBLISHED');
+                    await Vehicle.updateOne(
+                        { _id: vehicle._id, tenantId },
+                        { $set: { atAdvertStatus: 'PUBLISHED' } }
+                    );
+                    console.log(`[AutoTrader] Autotrader advert published for stock ${vehicle.stockId}`);
                 }
             } catch (atError: any) {
                 const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown error';
