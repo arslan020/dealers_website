@@ -144,14 +144,14 @@ async function getVehicles(req: NextRequest) {
 
                 // If local DB status is stale vs AT, silently update it
                 if (atLifecycle && local.status !== statusFromAT && local._id) {
-                    Vehicle.findByIdAndUpdate(local._id, { $set: { status: statusFromAT } }).catch(() => {});
+                    Vehicle.findByIdAndUpdate(local._id, { $set: { status: statusFromAT } }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 }
 
                 // Prefer local DB images over AT cache — AT cache may be stale/empty after an edit
                 const hasSavedImages = local.primaryImage && local.primaryImage !== '';
                 // Persist stockId to local doc if missing — enables AT fetch on detail page
                 if (!local.stockId && atv.id) {
-                    Vehicle.findByIdAndUpdate(local._id, { $set: { stockId: atv.id } }).catch(() => {});
+                    Vehicle.findByIdAndUpdate(local._id, { $set: { stockId: atv.id } }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 }
 
                 // Heal fields that are empty in local DB but present in AT cache
@@ -176,7 +176,7 @@ async function getVehicles(req: NextRequest) {
                 if (!local.dateOfRegistration || local.dateOfRegistration === '') { const v = atv.vehicle?.firstRegistrationDate || ''; if (v) healSet.dateOfRegistration = v; }
 
                 if (Object.keys(healSet).length > 0 && local._id) {
-                    Vehicle.findByIdAndUpdate(local._id, { $set: healSet }).catch(() => {});
+                    Vehicle.findByIdAndUpdate(local._id, { $set: healSet }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 }
 
                 mergedList[index] = {
@@ -203,7 +203,7 @@ async function getVehicles(req: NextRequest) {
                     const heal: Record<string, any> = {};
                     if (atLifecycle && localRecordAny.status !== statusFromAT) heal.status = statusFromAT;
                     if (!localRecordAny.stockId && atv.id) heal.stockId = atv.id;
-                    if (Object.keys(heal).length > 0) Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: heal }).catch(() => {});
+                    if (Object.keys(heal).length > 0) Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: heal }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 }
                 // Include in results if AT status matches the active filter
                 const filterMatches = !normalizedStatus || normalizedStatus === 'All' || normalizedStatus === statusFromAT;
@@ -222,7 +222,7 @@ async function getVehicles(req: NextRequest) {
                     if (!localRecordAny.bodyType || localRecordAny.bodyType === '') { const v = atStr(atv.vehicle?.bodyType || atv.bodyType); if (v) healAny.bodyType = v; }
                     if (!localRecordAny.year || localRecordAny.year === '') { const v = atv.vehicle?.yearOfManufacture || atv.year; if (v) healAny.year = String(v); }
                     if (Object.keys(healAny).length > 0 && localRecordAny._id) {
-                        Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: healAny }).catch(() => {});
+                        Vehicle.findByIdAndUpdate(localRecordAny._id, { $set: healAny }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                     }
                     mergedList.push({
                         ...localRecordAny,
@@ -800,11 +800,11 @@ async function updateVehicle(req: NextRequest) {
             // Save atSyncError so the UI can show a helpful message
             await Vehicle.findByIdAndUpdate(vehicle._id, {
                 $set: { atSyncError: 'Price must be at least £75 to sync with AutoTrader. Update the price and save again.' }
-            }).catch(() => {});
+            }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
         } else {
             try {
                 // Clear any previous sync error
-                await Vehicle.findByIdAndUpdate(vehicle._id, { $unset: { atSyncError: '' } }).catch(() => {});
+                await Vehicle.findByIdAndUpdate(vehicle._id, { $unset: { atSyncError: '' } }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 const atPayload = buildAtStockPayload(vehicle, vehicle._id.toString());
                 const atResult = await client.createStock(atPayload);
                 if (atResult?.metadata?.stockId) {
@@ -822,7 +822,7 @@ async function updateVehicle(req: NextRequest) {
                     console.error(`[AutoTrader createStock Error] ${atMsg}`);
                     await Vehicle.findByIdAndUpdate(vehicle._id, {
                         $set: { atSyncError: `AutoTrader sync failed: ${atMsg}` }
-                    }).catch(() => {});
+                    }).catch((err: any) => console.error('[DB Silent Update Error]', err?.message || err));
                 }
             }
         }

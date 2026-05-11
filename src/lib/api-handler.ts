@@ -18,7 +18,7 @@ export function withErrorHandler(handler: (req: NextRequest, context: ApiContext
                     error: {
                         message: error.message || 'Internal Server Error',
                         code: error.code || error.name || 'INTERNAL_ERROR',
-                        stack: error.stack,
+                        stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
                     },
                 },
                 { status: 500 }

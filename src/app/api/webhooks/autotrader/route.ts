@@ -203,7 +203,7 @@ export async function PUT(req: NextRequest) {
 
     // ── Apply to local DB ─────────────────────────────────────────────────────
     if (Object.keys($set).length > 0) {
-        await Vehicle.updateOne({ stockId }, { $set });
+        await Vehicle.updateOne({ stockId, tenantId }, { $set });
         console.log(`[AT Webhook] Stock ${stockId} synced from ${stockEventSource || 'AT portal'}:`, Object.keys($set));
     }
 
