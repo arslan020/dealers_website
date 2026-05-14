@@ -1,5 +1,6 @@
 import Tenant from '@/models/Tenant';
 import connectToDatabase from './db';
+import { ATCache, TTL } from './at-cache';
 
 /** Production: https://api.autotrader.co.uk — Sandbox: https://api-sandbox.autotrader.co.uk (set AUTOTRADER_API_URL) */
 const AUTOTRADER_BASE_URL = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
@@ -217,15 +218,26 @@ export class AutoTraderClient {
         return this.post('/valuations', payload, { advertiserId: this.dealerId! });
     }
 
-    /** GET /vehicles?registration={vrm}&advertiserId={dealerId}&features=true&competitors=true — core vehicle lookup. */
+    /** GET /vehicles?registration={vrm}&advertiserId={dealerId}&features=true&competitors=true — core vehicle lookup.
+     * AT docs: vehicle data, features, competitors and history are all returned in one call.
+     * Cached for 1 hour per VRM to eliminate repeated calls flagged by AT integration team.
+     */
     async lookupVehicle(registration: string) {
         if (!this.dealerId) await this.init();
-        return this.get('/vehicles', {
+        const cacheKey = `vehicle:${this.dealerId}:${registration.toUpperCase()}`;
+        const cached = ATCache.get(cacheKey);
+        if (cached) {
+            console.log(`[AT Cache HIT] vehicle lookup: ${registration}`);
+            return cached;
+        }
+        const result = await this.get('/vehicles', {
             registration,
             advertiserId: this.dealerId!,
             features: 'true',
             competitors: 'true',
         });
+        if (result) ATCache.set(cacheKey, result, TTL.VRM_LOOKUP); // 1 hour
+        return result;
     }
 
 

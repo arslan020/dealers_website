@@ -84,6 +84,7 @@ interface VehicleDetail {
     includes12MonthsMot?: boolean;
     includesMotInsurance?: boolean;
     tags?: string[];
+    dateOfRegistration?: string;
 
     stockId?: string;
     source?: string;
@@ -3250,7 +3251,9 @@ function OptionsTab({
         });
     }, [vehicleFeatures]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Re-sync checked when AT data arrives
+    // Re-sync checked when AT data arrives.
+    // RULE: only ADD new items from AT — NEVER set an already-checked item to false.
+    // This prevents AT reload from wiping user selections or DB-saved features.
     useEffect(() => {
         if (!atHasData) return;
         setChecked(prev => {
@@ -3258,14 +3261,20 @@ function OptionsTab({
             dynamicGroups.forEach(g => g.items.forEach(item => {
                 const label = (item as any).name || (item as any).label;
                 const wasSaved = (vehicleFeatures || []).includes(label);
-                if (wasSaved || !(label in map)) {
-                    map[label] = wasSaved || effectiveFactoryFitted.has(label) || (item as any).fitted || false;
-                } else if (effectiveFactoryFitted.has(label)) {
-                    map[label] = true;
+                // If already checked (user selected or DB-saved) → NEVER downgrade to false
+                if (map[label] === true) return;
+                // If saved in DB → force checked
+                if (wasSaved) { map[label] = true; return; }
+                // If factory-fitted → check it
+                if (effectiveFactoryFitted.has(label)) { map[label] = true; return; }
+                // New item not in map yet → set from AT fitted flag (usually false for options)
+                if (!(label in map)) {
+                    map[label] = (item as any).fitted || false;
                 }
+                // If item IS in map but is false → leave it false (user intentionally unchecked)
             }));
-            // Also ensure any saved custom features remain checked
-            (vehicleFeatures || []).forEach(f => { if (!(f in map)) map[f] = true; });
+            // Always ensure DB-saved features are checked, even if not in AT options list
+            (vehicleFeatures || []).forEach(f => { map[f] = true; });
             return map;
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4868,27 +4877,61 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         fetchVehicle();
     }, [id]);
 
-    // Warn user if they try to refresh/close with unsaved image changes
+    // Warn user if they try to refresh/close with ANY unsaved changes
+    // Covers: images, price, vehicle fields, description, features
+    const savedFieldsRef = useRef<string>('');
+
+    // Set baseline once vehicle data loads (so we can detect drift)
+    useEffect(() => {
+        if (!vehicle) return;
+        savedFieldsRef.current = JSON.stringify({
+            price: editPrice,
+            forecourtPrice: editForecourtPrice,
+            fields: editFields,
+            description: editDescription,
+            description2: editDescription2,
+            attentionGrabber: editAttentionGrabber,
+            features: [...editFeatures].sort(),
+            customFeatures: [...editCustomFeatures].sort(),
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [vehicle]); // only on initial load
+
     useEffect(() => {
         const isRealAtId = (s: string) => /^[a-f0-9]{32}$/i.test(String(s || ''));
-        const hasUnsaved = () => {
+
+        const hasUnsavedImages = () => {
             const baseline = new Set((savedImageIdsRef.current || []).filter(isRealAtId));
             const current = uploadedImages.map(i => i.imageId).filter(isRealAtId);
             if (current.length !== baseline.size) return true;
-            for (const id of current) if (!baseline.has(id)) return true;
+            for (const imgId of current) if (!baseline.has(imgId)) return true;
             return false;
         };
 
+        const hasUnsavedFields = () => {
+            if (!savedFieldsRef.current) return false;
+            const current = JSON.stringify({
+                price: editPrice,
+                forecourtPrice: editForecourtPrice,
+                fields: editFields,
+                description: editDescription,
+                description2: editDescription2,
+                attentionGrabber: editAttentionGrabber,
+                features: [...editFeatures].sort(),
+                customFeatures: [...editCustomFeatures].sort(),
+            });
+            return current !== savedFieldsRef.current;
+        };
+
         const handler = (e: BeforeUnloadEvent) => {
-            if (!hasUnsaved()) return;
+            if (!hasUnsavedImages() && !hasUnsavedFields()) return;
             e.preventDefault();
-            // Chrome requires returnValue to be set
-            e.returnValue = '';
+            e.returnValue = ''; // Chrome requires this
         };
 
         window.addEventListener('beforeunload', handler);
         return () => window.removeEventListener('beforeunload', handler);
-    }, [uploadedImages]);
+    }, [uploadedImages, editPrice, editForecourtPrice, editFields, editDescription, editDescription2, editAttentionGrabber, editFeatures, editCustomFeatures]);
 
     // Prefetch options as soon as we know the VRM
     useEffect(() => {
@@ -5132,7 +5175,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                 // Revert all optimistic updates on failure
                 const rollback: Partial<VehicleDetail> = {};
                 for (const [lKey, prev] of Object.entries(prevValues)) {
-                    rollback[lKey as keyof VehicleDetail] = prev;
+                    (rollback as any)[lKey] = prev;
                 }
                 setVehicle(prev => prev ? { ...prev, ...rollback } : null);
                 alert(err.message || 'Failed to update channel');

@@ -5,7 +5,9 @@
       "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/comments\")",
       "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/comments/[commentId]\")",
       "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/timecards\")",
-      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/timecards/[cardId]\")"
+      "Bash(mkdir -p \"c:/Users/eesa/OneDrive/Desktop/car dealer software/src/app/api/jobs/[id]/timecards/[cardId]\")",
+      "WebFetch(domain:developers.autotrader.co.uk)",
+      "Bash(npx tsc *)"
     ]
   }
 }

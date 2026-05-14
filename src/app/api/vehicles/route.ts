@@ -1069,11 +1069,16 @@ async function updateVehicle(req: NextRequest) {
         updateData.description      !== undefined ||
         updateData.description2     !== undefined
     );
+    // AT docs: advert channel status changes (publish/unpublish) must also bypass the cooldown.
+    // Selecting a channel in the UI must fire a PATCH immediately — no silent drops.
+    const ADVERT_CHANNEL_KEYS = ['autotraderAdvert', 'advertiserAdvert', 'locatorAdvert', 'exportAdvert', 'profileAdvert'];
+    const hasAdvertChanges = ADVERT_CHANNEL_KEYS.some(k => atBatchRetailAdverts[k] !== undefined);
+
     if (vehicle.stockId) {
         if (Object.keys(atBatchRetailAdverts).length > 0) atBatchAdverts.retailAdverts = atBatchRetailAdverts;
         if (Object.keys(atBatchAdverts).length > 0)      atBatch.adverts = atBatchAdverts;
         if (Object.keys(atBatchVehicle).length > 0)      atBatch.vehicle = atBatchVehicle;
-        if (Object.keys(atBatch).length > 0 && shouldSendToAt(String(vehicle.stockId), hasContentChanges)) {
+        if (Object.keys(atBatch).length > 0 && shouldSendToAt(String(vehicle.stockId), hasContentChanges || hasAdvertChanges)) {
             try {
                 await client.updateStock(vehicle.stockId, atBatch);
                 console.log('[AutoTrader] Batched PATCH synced:', Object.keys(atBatch));
