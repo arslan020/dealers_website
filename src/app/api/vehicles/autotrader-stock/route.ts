@@ -32,7 +32,7 @@ async function getAutoTraderStock(req: NextRequest) {
 
     // ─── Fetch fresh from AutoTrader with 60-second TTL ─────────────────────────
     let cache = await AutoTraderStockCache.findOne({ tenantId: tenantObjectId });
-    const CACHE_TTL_MS = 60 * 1000;
+    const CACHE_TTL_MS = 5 * 60 * 1000;
     const cacheFetchedAgeMs = cache?.fetchedAt ? now.getTime() - new Date(cache.fetchedAt).getTime() : Infinity;
     const shouldFetch = cacheFetchedAgeMs > CACHE_TTL_MS;
 
@@ -295,16 +295,21 @@ export async function POST(req: NextRequest) {
             ? 'DUE_IN'
             : 'FORECOURT';
 
-        // features: standard (all) + optional selected + custom, with factoryFitted flag
-        const allFeatureNames = [
-            ...(vehicle.standardFeatures || []),
-            ...(vehicle.features || []),
-            ...(vehicle.customFeatures || []),
+        // features: standard (type: Standard) + optional/custom (type: Optional), deduplicated
+        const stdFeatureNames = Array.isArray(vehicle.standardFeatures) ? vehicle.standardFeatures : [];
+        const optFeatureNames = [
+            ...(Array.isArray(vehicle.features)       ? vehicle.features       : []),
+            ...(Array.isArray(vehicle.customFeatures)  ? vehicle.customFeatures  : []),
         ];
-        const factoryFittedSet = new Set<string>(vehicle.factoryFittedFeatures || []);
-        const allFeatures = allFeatureNames.map((name: string) =>
-            factoryFittedSet.has(name) ? { name, factoryFitted: true } : { name }
-        );
+        const stdFeatureSet = new Set<string>(stdFeatureNames.map((f: any) => (typeof f === 'string' ? f : f.name || '')).filter(Boolean));
+        const seenFeatures  = new Set<string>();
+        const allFeatures = [...stdFeatureNames, ...optFeatureNames].reduce((acc: any[], f: any) => {
+            const name = typeof f === 'string' ? f : (f.name || '');
+            if (!name || seenFeatures.has(name)) return acc;
+            seenFeatures.add(name);
+            acc.push({ name, type: stdFeatureSet.has(name) ? 'Standard' : 'Optional' });
+            return acc;
+        }, []);
 
         // media.images: AT requires [{imageId}] — use locally stored AT imageIds
         const mediaImages = (vehicle.imageIds || []).map((imageId: string) => ({ imageId }));

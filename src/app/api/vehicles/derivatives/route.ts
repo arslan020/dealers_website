@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 /**
  * GET /api/vehicles/derivatives
@@ -30,7 +31,12 @@ async function handleDerivatives(req: NextRequest) {
     // ── Single derivative detail (for auto-complete) ─────────────────────────
     if (derivativeId) {
         try {
-            const data = await client.getDerivativeById(derivativeId);
+            const cacheKey = `derivative:id:${derivativeId}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getDerivativeById(derivativeId);
+                ATCache.set(cacheKey, data, TTL.DERIVATIVE);
+            }
             return NextResponse.json({ ok: true, derivative: data });
         } catch (err: any) {
             console.error('[Derivatives] getDerivativeById error:', err.message);
@@ -53,11 +59,15 @@ async function handleDerivatives(req: NextRequest) {
     }
 
     try {
-        const data = await client.searchDerivatives({ make, model, generation, fuelType, transmission, trim, vehicleType, generationId });
+        const cacheKey = `derivative:search:${make}:${model}:${generation}:${fuelType}:${transmission}:${trim}:${vehicleType}:${generationId}`;
+        let data = ATCache.get(cacheKey);
+        if (!data) {
+            data = await client.searchDerivatives({ make, model, generation, fuelType, transmission, trim, vehicleType, generationId });
+            ATCache.set(cacheKey, data, TTL.DERIVATIVE);
+        }
 
         // AT list response: { derivative: [{derivativeId, name}] } (no filters)
         //                or { derivatives: [{derivativeId, name, introduced, discontinued}] } (with filters)
-        // Technical fields (fuelType, transmissionType, etc.) are only in GET /taxonomy/derivatives/{id}
         const raw = data?.derivatives || data?.derivative || [];
         const derivatives = raw.map((d: any) => ({
             id: d.derivativeId,

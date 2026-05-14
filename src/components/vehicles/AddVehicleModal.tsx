@@ -153,10 +153,8 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
                     previousOwners: 1,
                     serviceHistory: 'Full',
                     features: featuresData.standardFeatures.map((f: any) => f.name).filter(Boolean),
-                    customFeatures: [
-                        ...featuresData.optionalExtras.filter((f: any) => f.fitted).map((f: any) => f.name),
-                        ...featuresData.factoryFitted,
-                    ].filter(Boolean),
+                    customFeatures: featuresData.optionalExtras.filter((f: any) => f.fitted).map((f: any) => f.name).filter(Boolean),
+                    factoryFittedFeatures: featuresData.factoryFitted,
                 }),
             });
             const data = await res.json();

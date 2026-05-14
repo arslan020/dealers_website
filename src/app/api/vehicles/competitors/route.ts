@@ -4,6 +4,7 @@ import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
 import connectToDatabase from '@/lib/db';
 import Tenant from '@/models/Tenant';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 const AUTOTRADER_BASE_URL = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
 
@@ -48,18 +49,32 @@ async function getCompetitors(req: NextRequest) {
             (tenant as any)?.businessProfile?.postcode ||
             '';
 
-        // Step 1: Always fetch the AT-curated competitor URL via /vehicles?competitors=true.
-        // This gives us AT's pre-built URL which includes registration!=VRM, minPlate/maxPlate,
-        // make, model — all correctly set by AT. We use it as the base search URL.
+        // Build cache key from all filter params — same filters = same results
+        const filterParamKeys = ['trim','fuelType','transmission','drivetrain','doors','minEngineSize','maxEngineSize',
+            'minMileage','maxMileage','minYear','maxYear','condition','sort','pageSize','distance'];
+        const filterSig = filterParamKeys.map(k => `${k}=${searchParams.get(k) || ''}`).join('&');
+        const competitorsCacheKey = `vrm:competitors:${vrm}:${filterSig}`;
+        const cachedResult = ATCache.get(competitorsCacheKey);
+        if (cachedResult) {
+            return NextResponse.json(cachedResult);
+        }
+
+        // Step 1: Fetch AT-curated competitor URL via /vehicles?competitors=true.
+        // Cache this per VRM since competitor URL doesn't change often.
         let vehicleData: any = null;
         let competitorUrl: string | undefined;
 
         try {
-            vehicleData = await client.get('/vehicles', {
-                registration: vrm,
-                advertiserId: client.dealerId || '',
-                competitors: 'true',
-            });
+            const compVrmKey = `vrm:comp-url:${vrm}`;
+            vehicleData = ATCache.get(compVrmKey);
+            if (!vehicleData) {
+                vehicleData = await client.get('/vehicles', {
+                    registration: vrm,
+                    advertiserId: client.dealerId || '',
+                    competitors: 'true',
+                });
+                if (vehicleData?.vehicle) ATCache.set(compVrmKey, vehicleData, TTL.VRM_LOOKUP);
+            }
 
             competitorUrl =
                 vehicleData?.links?.competitors?.href
@@ -489,7 +504,7 @@ async function getCompetitors(req: NextRequest) {
             return true;
         });
 
-        return NextResponse.json({
+        const responsePayload = {
             ok: true,
             competitors,
             total: competitors.length,
@@ -503,7 +518,12 @@ async function getCompetitors(req: NextRequest) {
                     model: searchParams.get('model') || vehicleForFallback.model || null,
                 }),
             },
-        });
+        };
+
+        // Cache for 30 min — competitor listings don't change second-by-second
+        if (competitors.length > 0) ATCache.set(competitorsCacheKey, responsePayload, 1800);
+
+        return NextResponse.json(responsePayload);
 
     } catch (error: any) {
         console.error('[Competitors API Error]', error.message, error.stack?.slice(0, 300));

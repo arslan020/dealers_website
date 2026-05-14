@@ -2563,11 +2563,13 @@ function HistoryTab({
     saving,
     onSave,
     onVinFound,
+    checkData,
 }: {
     vehicle: VehicleDetail;
     saving: boolean;
     onSave: (fields: Record<string, any>) => void;
     onVinFound?: (vin: string, engineNumber?: string) => void;
+    checkData?: any;
 }) {
     // Local state mirrors all history fields
     const [fields, setFields] = useState({
@@ -2622,53 +2624,47 @@ function HistoryTab({
     const [atFilled, setAtFilled] = useState(false);
     useEffect(() => {
         if (!vehicle.vrm || atFilled) return;
+
+        const applyCheckData = (d: any) => {
+            if (!d.ok) return;
+            const motTests: any[] = d.motTests || [];
+            const history = d.history || {};
+            const latestMot = motTests[0];
+
+            setFields(prev => {
+                const next = { ...prev };
+                if (!prev.previousOwners && history.previousOwners != null)
+                    next.previousOwners = history.previousOwners;
+                if (!prev.motExpiry && latestMot?.expiryDate)
+                    next.motExpiry = latestMot.expiryDate.split('T')[0];
+                const latestPassed = motTests.find((m: any) => m.testResult === 'Passed');
+                if (!prev.dateOfLastService && latestPassed?.completedDate)
+                    next.dateOfLastService = latestPassed.completedDate.split('T')[0];
+                if (!prev.mileageAtLastService && latestPassed?.odometerValue)
+                    next.mileageAtLastService = latestPassed.odometerValue;
+                return next;
+            });
+            const vinFromCheck = d.vehicle?.vin || d.vin || '';
+            const engFromCheck = d.vehicle?.engineNumber || '';
+            const missingVin = !vehicle.vin && !!vinFromCheck;
+            const missingEng = !vehicle.engineNumber && !!engFromCheck;
+            if (onVinFound && (missingVin || missingEng)) {
+                onVinFound(missingVin ? vinFromCheck : '', missingEng ? engFromCheck : undefined);
+            }
+            setAtFilled(true);
+        };
+
+        if (checkData) {
+            applyCheckData(checkData);
+            return;
+        }
+
         fetch(`/api/vehicles/vehicle-check?vrm=${encodeURIComponent(vehicle.vrm)}`)
             .then(r => r.json())
-            .then(d => {
-                if (!d.ok) return;
-                const motTests: any[] = d.motTests || [];
-                const history = d.history || {};
-                const latestMot = motTests[0]; // most recent MOT first
-
-                setFields(prev => {
-                    const next = { ...prev };
-
-                    // Previous Owners — from AT history
-                    if (!prev.previousOwners && history.previousOwners != null)
-                        next.previousOwners = history.previousOwners;
-
-                    // MOT Expiry — from latest MOT test
-                    if (!prev.motExpiry && latestMot?.expiryDate)
-                        next.motExpiry = latestMot.expiryDate.split('T')[0];
-
-                    // Date of Last Service — use most recent passed MOT date as proxy
-                    const latestPassed = motTests.find((m: any) => m.testResult === 'Passed');
-                    if (!prev.dateOfLastService && latestPassed?.completedDate)
-                        next.dateOfLastService = latestPassed.completedDate.split('T')[0];
-
-                    // Mileage at Last Service — from most recent passed MOT
-                    if (!prev.mileageAtLastService && latestPassed?.odometerValue)
-                        next.mileageAtLastService = latestPassed.odometerValue;
-
-                    // Date of Next Service — not available from AT
-                    // No. of Keys — not available from AT
-
-                    return next;
-                });
-                // VIN + Engine Number — propagate to parent if not already saved
-                const vinFromCheck = d.vehicle?.vin || d.vin || '';
-                const engFromCheck = d.vehicle?.engineNumber || '';
-                const missingVin = !vehicle.vin && !!vinFromCheck;
-                const missingEng = !vehicle.engineNumber && !!engFromCheck;
-                if (onVinFound && (missingVin || missingEng)) {
-                    onVinFound(missingVin ? vinFromCheck : '', missingEng ? engFromCheck : undefined);
-                }
-
-                setAtFilled(true);
-            })
-            .catch(() => {}); // silently fail — fields stay blank
+            .then(applyCheckData)
+            .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vehicle.vrm]);
+    }, [vehicle.vrm, checkData]);
 
     const mfgRemaining = calcRemainingMonths(fields.manufacturerWarrantyExpiry as string);
     const batRemaining = calcRemainingMonths(fields.batteryWarrantyExpiry as string);
@@ -3242,6 +3238,18 @@ function OptionsTab({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [checked]);
 
+    // Ensure DB-saved features are always checked once vehicle data arrives.
+    // buildInitialChecked runs at mount when vehicleFeatures is still [] (async load),
+    // so saved items end up as false in the map. This effect corrects that.
+    useEffect(() => {
+        if (!vehicleFeatures?.length) return;
+        setChecked(prev => {
+            const map = { ...prev };
+            vehicleFeatures.forEach(f => { map[f] = true; });
+            return map;
+        });
+    }, [vehicleFeatures]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // Re-sync checked when AT data arrives
     useEffect(() => {
         if (!atHasData) return;
@@ -3249,8 +3257,8 @@ function OptionsTab({
             const map: Record<string, boolean> = { ...prev };
             dynamicGroups.forEach(g => g.items.forEach(item => {
                 const label = (item as any).name || (item as any).label;
-                if (!(label in map)) {
-                    const wasSaved = (vehicleFeatures || []).includes(label);
+                const wasSaved = (vehicleFeatures || []).includes(label);
+                if (wasSaved || !(label in map)) {
                     map[label] = wasSaved || effectiveFactoryFitted.has(label) || (item as any).fitted || false;
                 } else if (effectiveFactoryFitted.has(label)) {
                     map[label] = true;
@@ -4216,7 +4224,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         params.set('tab', tab);
         router.replace(`${window.location.pathname}?${params.toString()}`, { scroll: false });
     }, [router]);
-    const [autoTraderConnected, setAutoTraderConnected] = useState<boolean>(true);
     const [activeImageTab, setActiveImageTab] = useState<'upload' | 'youtube' | 'library'>('upload');
     const [saving, setSaving] = useState(false);
     const [atSyncStatus, setAtSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'failed'>('idle');
@@ -4229,6 +4236,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [atFactoryFitted, setAtFactoryFitted] = useState<Set<string>>(new Set());
     const [atLoading, setAtLoading] = useState(false);
     const [atHasData, setAtHasData] = useState(false);
+    const [vehicleCheckData, setVehicleCheckData] = useState<any>(null);
 
     // Edit states
     const [editPrice, setEditPrice] = useState('');
@@ -4752,27 +4760,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             })
                             .catch(() => {}); // Silently fail — specs are nice-to-have
                     }
-                    // Auto-populate VIN + Engine Number via vehicle-check if either is missing
-                    if ((!v.vin || !v.engineNumber) && vrmForLookup && !id.startsWith('at-')) {
-                        fetch(`/api/vehicles/vehicle-check?vrm=${encodeURIComponent(vrmForLookup)}`)
-                            .then(r => r.json())
-                            .then(checkData => {
-                                const vinFromCheck = checkData?.vehicle?.vin || '';
-                                const engineNumberFromCheck = checkData?.vehicle?.engineNumber || '';
-                                const updates: Record<string, string> = {};
-                                if (!v.vin && vinFromCheck) updates.vin = vinFromCheck;
-                                if (!v.engineNumber && engineNumberFromCheck) updates.engineNumber = engineNumberFromCheck;
-                                if (!Object.keys(updates).length) return;
-                                fetch('/api/vehicles', {
-                                    method: 'PATCH',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ id: v._id || id, ...updates }),
-                                });
-                                setVehicle(prev => prev ? { ...prev, ...updates } : null);
-                                setEditFields(prev => ({ ...prev, ...updates }));
-                            })
-                            .catch(() => {});
-                    }
 
                     setEditPrice(String(v.price || ''));
                     setEditForecourtPrice(String(v.forecourtPrice || ''));
@@ -4942,6 +4929,34 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         return () => { cancelled = true; };
     }, [vehicle?.vrm]);
 
+    // Single shared vehicle-check fetch — handles VIN/engine auto-fill + feeds HistoryTab
+    useEffect(() => {
+        const vrm = vehicle?.vrm?.trim();
+        if (!vrm || id.startsWith('at-')) return;
+        let cancelled = false;
+        fetch(`/api/vehicles/vehicle-check?vrm=${encodeURIComponent(vrm)}`)
+            .then(r => r.json())
+            .then(d => {
+                if (cancelled || !d.ok) return;
+                setVehicleCheckData(d);
+                const vinFromCheck = d.vehicle?.vin || '';
+                const engineNumberFromCheck = d.vehicle?.engineNumber || '';
+                const updates: Record<string, string> = {};
+                if (!vehicle?.vin && vinFromCheck) updates.vin = vinFromCheck;
+                if (!vehicle?.engineNumber && engineNumberFromCheck) updates.engineNumber = engineNumberFromCheck;
+                if (!Object.keys(updates).length) return;
+                fetch('/api/vehicles', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: vehicle?._id || id, ...updates }),
+                });
+                setVehicle(prev => prev ? { ...prev, ...updates } : null);
+                setEditFields(prev => ({ ...prev, ...updates }));
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [vehicle?.vrm]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // Fetch real deals when stockId is known
     useEffect(() => {
         if (!vehicle?.stockId) return;
@@ -4953,32 +4968,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
             .finally(() => setDealsLoading(false));
     }, [vehicle?.stockId]);
 
-    // Hide competitors tab if AT account is not connected for this tenant.
-    useEffect(() => {
-        if (!vehicle?.vrm) return;
-        let cancelled = false;
-        const checkAutoTraderConnection = async () => {
-            try {
-                const res = await fetch(`/api/vehicles/competitors?vrm=${encodeURIComponent(vehicle.vrm)}&pageSize=1`);
-                const data = await res.json();
-                const msg = String(data?.error?.message || '').toLowerCase();
-                const notConnected = msg.includes('not configured')
-                    || msg.includes('not set')
-                    || msg.includes('credentials');
-                if (!cancelled) setAutoTraderConnected(!notConnected);
-            } catch {
-                // Keep visible on transient network issues.
-            }
-        };
-        checkAutoTraderConnection();
-        return () => { cancelled = true; };
-    }, [vehicle?.vrm]);
-
-    useEffect(() => {
-        if (!autoTraderConnected && activeTab === 'competitors') {
-            setActiveTab('overview');
-        }
-    }, [autoTraderConnected, activeTab]);
 
     /* ─── Save Handlers ────────────────────────────────────────────────────── */
     const patchVehicle = useCallback(async (updates: Record<string, any>) => {
@@ -5072,15 +5061,18 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         profileAdvertStatus:    'profile',
     };
 
-    // Instantly toggle a single channel on AT and persist. Includes advert text so
-    // description/attention grabber stay in sync each time a channel is toggled.
+    // Pending channel changes accumulator + debounce timer ref
+    const pendingChannelChanges = useRef<Record<string, string>>({});
+    const channelDebounceTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const channelPrevValues     = useRef<Record<string, string>>({});
+
+    // Toggle a channel — batches rapid consecutive toggles into one AT PATCH request
     const toggleAndSave = async (chanKey: string) => {
         if (!vehicle) return;
         if (!vehicle.stockId) {
             alert('No AutoTrader stock ID — create the stock record on AutoTrader first.');
             return;
         }
-        if (savingChannel) return; // prevent concurrent saves
 
         const channelName = CHAN_KEY_TO_AT[chanKey];
         if (!channelName) return;
@@ -5088,42 +5080,66 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         const current = vehicle[chanKey as keyof VehicleDetail] as string;
         const next = current === 'PUBLISHED' ? 'NOT_PUBLISHED' : 'PUBLISHED';
 
-        // Optimistic update
+        // Save original value for rollback (only on first change)
+        if (!(chanKey in channelPrevValues.current)) {
+            channelPrevValues.current[chanKey] = current;
+        }
+
+        // Accumulate change + optimistic UI update
+        pendingChannelChanges.current[channelName] = next;
         setVehicle(prev => prev ? { ...prev, [chanKey]: next } : null);
         setSavingChannel(chanKey);
-        try {
-            const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    channels: { [channelName]: next },
-                    attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
-                    description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
-                }),
-            });
-            const data = await res.json();
-            if (!data.ok) throw new Error(data.error || 'Failed to update channel');
 
-            const actual = data.actualStatuses || {};
-            const localUpdates: Partial<VehicleDetail> = {
-                [chanKey]: actual[chanKey] || next,
-            };
-            setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
-            await patchVehicle(localUpdates);
+        // Debounce: wait 400ms for more toggles before sending
+        if (channelDebounceTimer.current) clearTimeout(channelDebounceTimer.current);
+        channelDebounceTimer.current = setTimeout(async () => {
+            const channels = { ...pendingChannelChanges.current };
+            const prevValues = { ...channelPrevValues.current };
+            pendingChannelChanges.current = {};
+            channelPrevValues.current = {};
 
-            if (data.warnings?.length > 0) {
-                const msgs = data.warnings.map((w: any) =>
-                    `${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`
-                ).join('\n');
-                alert(`Channel update warning:\n\n${msgs}`);
+            try {
+                const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channels,
+                        attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
+                        description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
+                    }),
+                });
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || 'Failed to update channel');
+
+                const actual = data.actualStatuses || {};
+                const localUpdates: Partial<VehicleDetail> = {};
+                for (const [lKey, atKey] of Object.entries(CHAN_KEY_TO_AT)) {
+                    if (channels[atKey] !== undefined) {
+                        localUpdates[lKey as keyof VehicleDetail] = actual[lKey] || channels[atKey];
+                    }
+                }
+                setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
+                // advertise endpoint already persists statuses to local DB — no second PATCH needed.
+                // Calling patchVehicle here was doubling the AT API call (once via advertise, once via updateVehicle).
+
+                if (data.warnings?.length > 0) {
+                    const msgs = data.warnings.map((w: any) =>
+                        `${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`
+                    ).join('\n');
+                    alert(`Channel update warning:\n\n${msgs}`);
+                }
+            } catch (err: any) {
+                // Revert all optimistic updates on failure
+                const rollback: Partial<VehicleDetail> = {};
+                for (const [lKey, prev] of Object.entries(prevValues)) {
+                    rollback[lKey as keyof VehicleDetail] = prev;
+                }
+                setVehicle(prev => prev ? { ...prev, ...rollback } : null);
+                alert(err.message || 'Failed to update channel');
+            } finally {
+                setSavingChannel(null);
             }
-        } catch (err: any) {
-            // Revert optimistic update on failure
-            setVehicle(prev => prev ? { ...prev, [chanKey]: current } : null);
-            alert(err.message || 'Failed to update channel');
-        } finally {
-            setSavingChannel(null);
-        }
+        }, 400);
     };
 
     const handleCreateAtStock = async () => {
@@ -5244,7 +5260,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const metrics = vehicle.responseMetrics;
     const visibleTabGroups = TAB_GROUPS.map(group => ({
         ...group,
-        tabs: group.tabs.filter(tab => autoTraderConnected || tab.id !== 'competitors'),
+        tabs: group.tabs,
     })).filter(group => group.tabs.length > 0);
 
     /* ─── Render ───────────────────────────────────────────────────────────── */
@@ -6527,6 +6543,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 vehicle={vehicle}
                                 saving={saving}
                                 onSave={(updates) => patchVehicle(updates)}
+                                checkData={vehicleCheckData}
                                 onVinFound={(vin, engineNumber) => {
                                     const patch: Record<string, string> = {};
                                     if (vin) patch.vin = vin;

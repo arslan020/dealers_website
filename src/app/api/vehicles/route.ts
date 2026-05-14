@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import { pickSilentSalesmanDescriptionFromVehicle, advertDescriptionToPlainText } from '@/lib/silent-salesman/vehicle-fields';
 
 import AutoTraderStockCache from '@/models/AutoTraderStockCache';
+import { shouldSendToAt } from '@/lib/at-cache';
 
 async function getVehicles(req: NextRequest) {
     const tenantId = req.headers.get('x-tenant-id');
@@ -312,20 +313,23 @@ const AT_ORIGIN_MAP: Record<string, string> = {
 };
 
 function buildAtStockPayload(vehicle: any, mongoId: string, isDraft: boolean = false) {
-    // Combine all feature types: standard (always sent) + optional selected + custom
-    const allFeatureNames = [
-        ...(Array.isArray(vehicle.standardFeatures) ? vehicle.standardFeatures : []),
-        ...(Array.isArray(vehicle.features) ? vehicle.features : []),
-        ...(Array.isArray(vehicle.customFeatures) ? vehicle.customFeatures : []),
+    // Build features with AT-required type field: Standard (derivative spec) vs Optional (extras)
+    const stdNames  = Array.isArray(vehicle.standardFeatures) ? vehicle.standardFeatures : [];
+    const optNames  = [
+        ...(Array.isArray(vehicle.features)       ? vehicle.features       : []),
+        ...(Array.isArray(vehicle.customFeatures)  ? vehicle.customFeatures  : []),
     ];
-    const factoryFittedSet = new Set<string>(
-        Array.isArray(vehicle.factoryFittedFeatures) ? vehicle.factoryFittedFeatures : []
-    );
+    const stdSet = new Set<string>(stdNames.map((f: any) => (typeof f === 'string' ? f : f.name || '')).filter(Boolean));
+    const seen   = new Set<string>();
+    const allFeatureNames = [...stdNames, ...optNames];
     const featuresPayload = allFeatureNames.length > 0
-        ? allFeatureNames.map((f: any) => {
+        ? allFeatureNames.reduce((acc: any[], f: any) => {
             const name = typeof f === 'string' ? f : (f.name || '');
-            return factoryFittedSet.has(name) ? { name, factoryFitted: true } : { name };
-        })
+            if (!name || seen.has(name)) return acc;
+            seen.add(name);
+            acc.push({ name, type: stdSet.has(name) ? 'Standard' : 'Optional' });
+            return acc;
+        }, [])
         : undefined;
 
     // engineSize stored as CC string from lookup (e.g. "1998"). Treat values >100 as CC, <=100 as litres.
@@ -634,92 +638,60 @@ async function updateVehicle(req: NextRequest) {
     // â”€â”€â”€ Sync with AutoTrader / Updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const client = new AutoTraderClient(tenantId);
     await client.init();
-    
-    // 1. Advert Channel Statuses
-    const advertFields = [
-        { key: 'atAdvertStatus', channel: 'autotrader' },
-        { key: 'advertiserAdvertStatus', channel: 'advertiser' },
-        { key: 'locatorAdvertStatus', channel: 'locator' },
-        { key: 'exportAdvertStatus', channel: 'export' },
-        { key: 'profileAdvertStatus', channel: 'profile' },
-    ] as const;
 
-    for (const field of advertFields) {
-        if (updateData[field.key] && vehicle.stockId) {
-            try {
-                await client.updateStockAdvertiseStatus(vehicle.stockId, field.channel, updateData[field.key]);
-                console.log(`[AutoTrader] ${field.channel} status updated to ${updateData[field.key]}`);
-            } catch (e) {
-                console.error(`[AutoTrader] Failed to update ${field.channel} status:`, e);
+    // All AT field changes are collected into a single batched PATCH — reduces 10+ calls to 1-2.
+    // Exceptions: lifecycle (requires sequential unpublish→update) and images (separate handling).
+    const atBatch: Record<string, any> = {};
+    const atBatchAdverts: Record<string, any> = {};
+    const atBatchRetailAdverts: Record<string, any> = {};
+    const atBatchVehicle: Record<string, any> = {};
+
+    // 1. Advert Channel Statuses — batch into retailAdverts (was up to 5 separate calls)
+    const channelKeyMap: Record<string, string> = {
+        autotrader: 'autotraderAdvert', advertiser: 'advertiserAdvert',
+        locator: 'locatorAdvert', export: 'exportAdvert', profile: 'profileAdvert',
+    };
+    if (vehicle.stockId) {
+        for (const [statusKey, channel] of [
+            ['atAdvertStatus', 'autotrader'], ['advertiserAdvertStatus', 'advertiser'],
+            ['locatorAdvertStatus', 'locator'], ['exportAdvertStatus', 'export'],
+            ['profileAdvertStatus', 'profile'],
+        ] as [string, string][]) {
+            if (updateData[statusKey]) {
+                atBatchRetailAdverts[channelKeyMap[channel]] = { status: updateData[statusKey] };
             }
         }
     }
 
-    // 2. Sync Price (Â£75 minimum enforced)
-    if (vehicle.stockId && (updateData.price !== undefined || updateData.forecourtPrice !== undefined)) {
-        const retailAdverts: Record<string, any> = {};
-        const advertsTopLevel: Record<string, any> = {};
-
+    // 2. Price + 2b. Advert settings — all batched into atBatchAdverts/atBatchRetailAdverts
+    if (vehicle.stockId) {
         if (updateData.price !== undefined) {
             if (Number(updateData.price) < 75) {
-                console.warn('[AutoTrader] Supplied price too low (Â£75 min), skipping AT sync');
+                console.warn('[AutoTrader] Supplied price too low (£75 min), skipping AT sync');
             } else {
-                retailAdverts.suppliedPrice = { amountGBP: Number(updateData.price) };
+                atBatchRetailAdverts.suppliedPrice = { amountGBP: Number(updateData.price) };
+                // forecourtPrice always defaults to the new supplied price when not explicitly set.
+                // Using vehicle.forecourtPrice (old DB value) was a bug — it prevented the price from
+                // updating forecourtPrice when the user changed it.
+                if (updateData.forecourtPrice === undefined) {
+                    atBatchAdverts.forecourtPrice = { amountGBP: Number(updateData.price) };
+                }
             }
         }
-
-        // forecourtPrice is at adverts level (NOT inside retailAdverts) per AT docs
-        if (updateData.forecourtPrice !== undefined && Number(updateData.forecourtPrice) > 0) {
-            advertsTopLevel.forecourtPrice = { amountGBP: Number(updateData.forecourtPrice) };
-        }
-
-        if (Object.keys(retailAdverts).length > 0) advertsTopLevel.retailAdverts = retailAdverts;
-        if (Object.keys(advertsTopLevel).length > 0) {
-            try {
-                await client.updateStock(vehicle.stockId, { adverts: advertsTopLevel });
-                console.log('[AutoTrader] Price synced:', advertsTopLevel);
-            } catch (atError) {
-                console.error('[AutoTrader Price Sync Error]', atError);
-            }
-        }
-    }
-
-    // 2b. Sync advert-level availability/settings fields
-    if (vehicle.stockId) {
-        const atAdverts: Record<string, any> = {};
-        const atRetailAdverts: Record<string, any> = {};
-
-        // Existing fields
-        if (updateData.includes12MonthsMot !== undefined) atAdverts.twelveMonthsMot = updateData.includes12MonthsMot;
-        if (updateData.includesMotInsurance !== undefined) atAdverts.motInsurance = updateData.includesMotInsurance;
-        if (updateData.dueInDate !== undefined) atAdverts.dueDate = updateData.dueInDate || null;
-        if (updateData.dateInStock !== undefined) atAdverts.stockInDate = updateData.dateInStock || null;
-        if (updateData.vatStatus !== undefined) {
-            atAdverts.vatScheme = updateData.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal';
-        }
-
-        // ── NEW: additional advert-level fields ───────────────────────────────
-        // Dealer internal fields (not shown to consumers on AT)
-        if (updateData.purchasePrice !== undefined)          atAdverts.purchasePrice          = { amountGBP: Number(updateData.purchasePrice) || null };
-        if (updateData.preparationCosts !== undefined)       atAdverts.preparationCosts       = { amountGBP: Number(updateData.preparationCosts) || null };
-        if (updateData.soldDate !== undefined)               atAdverts.soldDate               = updateData.soldDate || null;
-        if (updateData.soldPrice !== undefined)              atAdverts.soldPrice              = { amountGBP: Number(updateData.soldPrice) || null };
-        if (updateData.manufacturerApproved !== undefined)   atAdverts.manufacturerApproved   = Boolean(updateData.manufacturerApproved);
-        // forecourtPriceVatStatus: Inc VAT | No VAT | Ex VAT (for LCVs)
-        if (updateData.forecourtPriceVatStatus !== undefined) atAdverts.forecourtPriceVatStatus = updateData.forecourtPriceVatStatus || null;
-        // adminFee: mandatory per-vehicle fee (goes inside retailAdverts)
-        if (updateData.adminFee !== undefined)               atRetailAdverts.adminFee         = { amountGBP: Number(updateData.adminFee) || null };
-
-        if (Object.keys(atRetailAdverts).length > 0) atAdverts.retailAdverts = atRetailAdverts;
-
-        if (Object.keys(atAdverts).length > 0) {
-            try {
-                await client.updateStock(vehicle.stockId, { adverts: atAdverts });
-                console.log('[AutoTrader] Advert settings synced:', Object.keys(atAdverts));
-            } catch (atError) {
-                console.error('[AutoTrader Advert Settings Sync Error]', atError);
-            }
-        }
+        if (updateData.forecourtPrice !== undefined && Number(updateData.forecourtPrice) > 0)
+            atBatchAdverts.forecourtPrice = { amountGBP: Number(updateData.forecourtPrice) };
+        if (updateData.includes12MonthsMot !== undefined)    atBatchAdverts.twelveMonthsMot        = updateData.includes12MonthsMot;
+        if (updateData.includesMotInsurance !== undefined)   atBatchAdverts.motInsurance           = updateData.includesMotInsurance;
+        if (updateData.dueInDate !== undefined)              atBatchAdverts.dueDate                = updateData.dueInDate || null;
+        if (updateData.dateInStock !== undefined)            atBatchAdverts.stockInDate            = updateData.dateInStock || null;
+        if (updateData.vatStatus !== undefined)              atBatchAdverts.vatScheme              = updateData.vatStatus === 'VAT Qualifying' ? 'Standard' : 'Marginal';
+        if (updateData.purchasePrice !== undefined)          atBatchAdverts.purchasePrice          = { amountGBP: Number(updateData.purchasePrice) || null };
+        if (updateData.preparationCosts !== undefined)       atBatchAdverts.preparationCosts       = { amountGBP: Number(updateData.preparationCosts) || null };
+        if (updateData.soldDate !== undefined)               atBatchAdverts.soldDate               = updateData.soldDate || null;
+        if (updateData.soldPrice !== undefined)              atBatchAdverts.soldPrice              = { amountGBP: Number(updateData.soldPrice) || null };
+        if (updateData.manufacturerApproved !== undefined)   atBatchAdverts.manufacturerApproved   = Boolean(updateData.manufacturerApproved);
+        if (updateData.forecourtPriceVatStatus !== undefined) atBatchAdverts.forecourtPriceVatStatus = updateData.forecourtPriceVatStatus || null;
+        if (updateData.adminFee !== undefined)               atBatchRetailAdverts.adminFee         = { amountGBP: Number(updateData.adminFee) || null };
     }
 
     // 3. Sync Lifecycle State (with mandatory Unpublish for SOLD/WASTEBIN/DELETED/DRAFT)
@@ -960,73 +932,68 @@ async function updateVehicle(req: NextRequest) {
         if (updateData.tyreCondition !== undefined)          vehicleUpdate.tyreCondition           = AT_CONDITION_MAP[updateData.tyreCondition]     ?? updateData.tyreCondition;
         if (updateData.exteriorCondition !== undefined)      vehicleUpdate.bodyCondition           = AT_CONDITION_MAP[updateData.exteriorCondition] ?? updateData.exteriorCondition;
 
-        if (Object.keys(vehicleUpdate).length > 0) {
-            try {
-                await client.updateStock(vehicle.stockId, { vehicle: vehicleUpdate });
-                console.log('[AutoTrader] Vehicle fields synced:', Object.keys(vehicleUpdate));
-            } catch (atError) {
-                console.error('[AutoTrader Vehicle Field Sync Error]', atError);
-            }
-        }
+        // Vehicle fields → batched
+        Object.assign(atBatchVehicle, vehicleUpdate);
+        if (Object.keys(vehicleUpdate).length > 0) console.log('[AutoTrader] Vehicle fields queued:', Object.keys(vehicleUpdate));
     }
 
-    // 5. Sync advert content (description, description2, attentionGrabber, longAttentionGrabber, priceOnApplication)
+    // 5. Advert content — batch into atBatchRetailAdverts
     if (vehicle.stockId) {
-        const advertUpdate: Record<string, any> = {};
-        if (updateData.description !== undefined)        advertUpdate.description        = updateData.description;
-        if (updateData.description2 !== undefined)       advertUpdate.description2       = updateData.description2;
-        if (updateData.attentionGrabber !== undefined)   advertUpdate.attentionGrabber   = updateData.attentionGrabber;
-        if (updateData.priceOnApplication !== undefined) advertUpdate.priceOnApplication = updateData.priceOnApplication;
-        // longAttentionGrabber (70 chars) stored in AT as description2 when description2 is empty
-        if (updateData.longAttentionGrabber !== undefined && !updateData.description2) {
-            const lag = String(updateData.longAttentionGrabber || '').trim().slice(0, 70);
-            advertUpdate.description2 = lag || null;
+        if (updateData.description !== undefined) {
+            const v = advertDescriptionToPlainText(updateData.description).trim().slice(0, 4000);
+            if (v) atBatchRetailAdverts.description = v;
         }
-
-        if (Object.keys(advertUpdate).length > 0) {
-            // Strip HTML, enforce AT character limits, and omit empty fields (AT rejects empty strings)
-            if (advertUpdate.description !== undefined) {
-                const v = advertDescriptionToPlainText(advertUpdate.description).trim().slice(0, 4000);
-                if (v) advertUpdate.description = v; else delete advertUpdate.description;
-            }
-            if (advertUpdate.description2 !== undefined) {
-                const v = advertDescriptionToPlainText(advertUpdate.description2).trim().slice(0, 4000);
-                if (v) advertUpdate.description2 = v; else delete advertUpdate.description2;
-            }
-            if (advertUpdate.attentionGrabber !== undefined) {
-                const v = String(advertUpdate.attentionGrabber).trim().slice(0, 30);
-                if (v) advertUpdate.attentionGrabber = v; else delete advertUpdate.attentionGrabber;
-            }
-
-            try {
-                await client.updateStock(vehicle.stockId, { adverts: { retailAdverts: advertUpdate } });
-                console.log('[AutoTrader] Advert content synced');
-            } catch (atError: any) {
-                const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown error';
-                console.error(`[AutoTrader Advert Sync Error] ${vehicle.stockId}: ${atMsg}`, JSON.stringify(atError?.data));
-            }
+        if (updateData.description2 !== undefined) {
+            const v = advertDescriptionToPlainText(updateData.description2).trim().slice(0, 4000);
+            if (v) atBatchRetailAdverts.description2 = v;
+        }
+        if (updateData.attentionGrabber !== undefined) {
+            const v = String(updateData.attentionGrabber).trim().slice(0, 30);
+            if (v) atBatchRetailAdverts.attentionGrabber = v;
+        }
+        if (updateData.priceOnApplication !== undefined) atBatchRetailAdverts.priceOnApplication = updateData.priceOnApplication;
+        if (updateData.longAttentionGrabber !== undefined && !updateData.description2) {
+            const v = String(updateData.longAttentionGrabber || '').trim().slice(0, 70);
+            if (v) atBatchRetailAdverts.description2 = v;
         }
     }
 
-    // 6. Sync features list (full replacement as per AT docs)
-    // standard (all) + optional selected + custom + factoryFitted flag
+    // 6. Features — batch into atBatch.features
     if (vehicle.stockId && updateData.features !== undefined) {
+        const stdNames   = Array.isArray(updateData.standardFeatures ?? vehicle.standardFeatures)
+            ? (updateData.standardFeatures ?? vehicle.standardFeatures) : [];
+        const optNames   = [
+            ...(Array.isArray(updateData.features) ? updateData.features : []),
+            ...(Array.isArray(updateData.customFeatures ?? vehicle.customFeatures) ? (updateData.customFeatures ?? vehicle.customFeatures) : []),
+        ];
+        const stdSetU = new Set<string>(stdNames.map((f: any) => (typeof f === 'string' ? f : f.name || '')).filter(Boolean));
+
+        // Build type map from AT cache — the cache stores { name, type } from AT's own response,
+        // so names match exactly. This prevents naming-mismatch between the optional-extras API
+        // (used for stdSetU) and the actual stock item features, which caused all Standard features
+        // to be sent as Optional.
+        const cacheTypeMap: Record<string, string> = {};
         try {
-            const allNames = [
-                ...(Array.isArray(updateData.standardFeatures ?? vehicle.standardFeatures) ? (updateData.standardFeatures ?? vehicle.standardFeatures) : []),
-                ...(Array.isArray(updateData.features) ? updateData.features : []),
-                ...(Array.isArray(updateData.customFeatures ?? vehicle.customFeatures) ? (updateData.customFeatures ?? vehicle.customFeatures) : []),
-            ];
-            const ffSet = new Set<string>(Array.isArray(updateData.factoryFittedFeatures ?? vehicle.factoryFittedFeatures) ? (updateData.factoryFittedFeatures ?? vehicle.factoryFittedFeatures) : []);
-            const featuresPayload = allNames.map((f: any) => {
-                const name = typeof f === 'string' ? f : (f.name || '');
-                return ffSet.has(name) ? { name, factoryFitted: true } : { name };
+            const atCacheDoc = await AutoTraderStockCache.findOne({ tenantId });
+            const cachedItem = atCacheDoc?.stock?.find((s: any) => s.id === vehicle.stockId);
+            (cachedItem?.features || []).forEach((f: any) => {
+                const n = typeof f === 'string' ? f : (f.name || '');
+                const t = typeof f === 'object' && f.type ? f.type : null;
+                if (n && t) cacheTypeMap[n] = t;
             });
-            await client.updateStock(vehicle.stockId, { features: featuresPayload });
-            console.log(`[AutoTrader] Features synced: ${featuresPayload.length} items (${(updateData.standardFeatures ?? vehicle.standardFeatures ?? []).length} std, ${(updateData.features ?? []).length} optional, ${(updateData.customFeatures ?? vehicle.customFeatures ?? []).length} custom)`);
-        } catch (atError) {
-            console.error('[AutoTrader Features Sync Error]', atError);
-        }
+        } catch {}
+
+        const seenUpdate = new Set<string>();
+        atBatch.features = [...stdNames, ...optNames].reduce((acc: any[], f: any) => {
+            const name = typeof f === 'string' ? f : (f.name || '');
+            if (!name || seenUpdate.has(name)) return acc;
+            seenUpdate.add(name);
+            // Priority: AT cache type (exact name match) → stdSet lookup → Optional
+            const type = cacheTypeMap[name] || (stdSetU.has(name) ? 'Standard' : 'Optional');
+            acc.push({ name, type });
+            return acc;
+        }, []);
+        console.log(`[AutoTrader] Features queued: ${atBatch.features.length} items`);
     }
 
     // 7. Sync media images (full imageId list replacement)
@@ -1069,43 +1036,51 @@ async function updateVehicle(req: NextRequest) {
         }
     }
 
-    // 7b. Sync media video and spin - on every save that touches these fields
+    // 7b. Media video/spin — batch into atBatch.media
     if (vehicle.stockId) {
-        const mediaUpdate: Record<string, any> = {};
         if (updateData.youtubeVideoIds !== undefined) {
             const firstVideoId = Array.isArray(updateData.youtubeVideoIds) ? updateData.youtubeVideoIds[0] : null;
-            mediaUpdate.video = firstVideoId ? { href: 'https://www.youtube.com/watch?v=' + firstVideoId } : { href: null };
+            atBatch.media = { ...(atBatch.media || {}), video: firstVideoId ? { href: 'https://www.youtube.com/watch?v=' + firstVideoId } : { href: null } };
         }
         if (updateData.spinUrl !== undefined) {
-            mediaUpdate.spin = updateData.spinUrl ? { href: updateData.spinUrl } : { href: null };
-        }
-        if (Object.keys(mediaUpdate).length > 0) {
-            try {
-                await client.updateStock(vehicle.stockId, { media: mediaUpdate });
-                console.log('[AutoTrader] Media video/spin synced:', Object.keys(mediaUpdate));
-            } catch (atError) {
-                console.error('[AutoTrader Media Video/Spin Sync Error]', atError);
-            }
+            atBatch.media = { ...(atBatch.media || {}), spin: updateData.spinUrl ? { href: updateData.spinUrl } : { href: null } };
         }
     }
 
-    // 7c. Sync displayOptions (excludeFromAdvert) - controls what is hidden on the AT consumer advert
+    // 7c. displayOptions — batch into atBatchRetailAdverts
     if (vehicle.stockId && updateData.excludeFromAdvert !== undefined) {
         const exFromAdvert = updateData.excludeFromAdvert || {};
-        try {
-            const displayOptions = {
-                excludePreviousOwners:  Boolean(exFromAdvert.previousOwners),
-                excludeStrapline:       Boolean(exFromAdvert.attentionGrabber),
-                excludeMot:             Boolean(exFromAdvert.mot),
-                excludeWarranty:        Boolean(exFromAdvert.warranty),
-                excludeInteriorDetails: Boolean(exFromAdvert.interiorCondition),
-                excludeTyreCondition:   Boolean(exFromAdvert.tyreCondition),
-                excludeBodyCondition:   Boolean(exFromAdvert.exteriorCondition),
-            };
-            await client.updateStock(vehicle.stockId, { adverts: { retailAdverts: { displayOptions } } });
-            console.log('[AutoTrader] displayOptions synced');
-        } catch (atError) {
-            console.error('[AutoTrader displayOptions Sync Error]', atError);
+        atBatchRetailAdverts.displayOptions = {
+            excludePreviousOwners:  Boolean(exFromAdvert.previousOwners),
+            excludeStrapline:       Boolean(exFromAdvert.attentionGrabber),
+            excludeMot:             Boolean(exFromAdvert.mot),
+            excludeWarranty:        Boolean(exFromAdvert.warranty),
+            excludeInteriorDetails: Boolean(exFromAdvert.interiorCondition),
+            excludeTyreCondition:   Boolean(exFromAdvert.tyreCondition),
+            excludeBodyCondition:   Boolean(exFromAdvert.exteriorCondition),
+        };
+    }
+
+    // ─── Send ONE combined PATCH to AT (all queued field changes) ────────────────
+    // Content fields (attentionGrabber, description, description2) bypass the cooldown —
+    // they must always reach AT so the advert text stays in sync.
+    const hasContentChanges = !!(
+        updateData.attentionGrabber !== undefined ||
+        updateData.description      !== undefined ||
+        updateData.description2     !== undefined
+    );
+    if (vehicle.stockId) {
+        if (Object.keys(atBatchRetailAdverts).length > 0) atBatchAdverts.retailAdverts = atBatchRetailAdverts;
+        if (Object.keys(atBatchAdverts).length > 0)      atBatch.adverts = atBatchAdverts;
+        if (Object.keys(atBatchVehicle).length > 0)      atBatch.vehicle = atBatchVehicle;
+        if (Object.keys(atBatch).length > 0 && shouldSendToAt(String(vehicle.stockId), hasContentChanges)) {
+            try {
+                await client.updateStock(vehicle.stockId, atBatch);
+                console.log('[AutoTrader] Batched PATCH synced:', Object.keys(atBatch));
+            } catch (atError: any) {
+                const atMsg = atError?.data?.message || atError?.data?.errors?.[0]?.message || atError?.message || 'Unknown error';
+                console.error(`[AutoTrader Batch Sync Error] ${vehicle.stockId}: ${atMsg}`, JSON.stringify(atError?.data));
+            }
         }
     }
 

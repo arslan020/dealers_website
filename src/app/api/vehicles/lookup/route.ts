@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 // Scores a candidate derivative against known vehicle signals.
 // Higher = better match. Used when the VRM lookup returns no/wrong/incomplete derivativeId.
@@ -79,8 +80,12 @@ async function lookupVehicle(req: NextRequest) {
         await client.init();
 
         // AutoTrader Vehicles API — PDF Page 20-25
-        // Correct endpoint: GET /vehicles?registration={vrm}&advertiserId={dealerId}
-        const responseData = await client.lookupVehicle(vrm);
+        const cacheKey = `vrm:lookup:${vrm.toUpperCase()}`;
+        let responseData = ATCache.get(cacheKey);
+        if (!responseData) {
+            responseData = await client.lookupVehicle(vrm);
+            if (responseData?.vehicle) ATCache.set(cacheKey, responseData, TTL.VRM_LOOKUP);
+        }
 
         // The API returns { vehicle: { ... } }
         const vehicleData = responseData.vehicle;

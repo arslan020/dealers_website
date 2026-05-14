@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 const VALID_FACETS = [
     'fuelTypes', 'transmissionTypes', 'bodyTypes', 'trims', 'doors',
@@ -42,7 +43,12 @@ async function handleTaxonomy(req: NextRequest) {
         if (resource === 'makes') {
             const vehicleType = searchParams.get('vehicleType') || 'Car';
             const make = searchParams.get('make') || undefined;
-            const data = await client.getTaxonomyMakes(vehicleType);
+            const cacheKey = `taxonomy:makes:${vehicleType}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyMakes(vehicleType);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             const makes = make
                 ? (data?.makes || []).filter((m: any) => m.name?.toLowerCase().includes(make.toLowerCase()))
                 : (data?.makes || []);
@@ -53,14 +59,24 @@ async function handleTaxonomy(req: NextRequest) {
             const makeId = searchParams.get('makeId');
             if (!makeId) return NextResponse.json({ ok: false, error: 'makeId required for models' }, { status: 400 });
             const vehicleType = searchParams.get('vehicleType') || 'Car';
-            const data = await client.getTaxonomyModels(makeId, vehicleType);
+            const cacheKey = `taxonomy:models:${makeId}:${vehicleType}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyModels(makeId, vehicleType);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, models: data?.models || [] });
         }
 
         if (resource === 'generations') {
             const modelId = searchParams.get('modelId');
             if (!modelId) return NextResponse.json({ ok: false, error: 'modelId required for generations' }, { status: 400 });
-            const data = await client.getTaxonomyGenerations(modelId);
+            const cacheKey = `taxonomy:generations:${modelId}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyGenerations(modelId);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, generations: data?.generations || [] });
         }
 
@@ -72,7 +88,12 @@ async function handleTaxonomy(req: NextRequest) {
             const vehicleType  = searchParams.get('vehicleType')   || undefined;
             const make         = searchParams.get('make')          || undefined;
             const model        = searchParams.get('model')         || undefined;
-            const data = await client.searchDerivatives({ generationId, fuelType, transmission, trim, vehicleType, make, model });
+            const cacheKey = `taxonomy:derivatives:${generationId}:${fuelType}:${transmission}:${trim}:${vehicleType}:${make}:${model}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.searchDerivatives({ generationId, fuelType, transmission, trim, vehicleType, make, model });
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, derivatives: data?.derivatives || data?.derivative || [] });
         }
 
@@ -82,7 +103,12 @@ async function handleTaxonomy(req: NextRequest) {
             if (!derivativeId || !effectiveDate) {
                 return NextResponse.json({ ok: false, error: 'derivativeId and effectiveDate required for features' }, { status: 400 });
             }
-            const data = await client.getTaxonomyFeatures(derivativeId, effectiveDate);
+            const cacheKey = `taxonomy:features:${derivativeId}:${effectiveDate}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyFeatures(derivativeId, effectiveDate);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, features: data?.features || [] });
         }
 
@@ -92,7 +118,12 @@ async function handleTaxonomy(req: NextRequest) {
                 return NextResponse.json({ ok: false, error: 'derivativeId required for prices' }, { status: 400 });
             }
             const effectiveDate = searchParams.get('effectiveDate') || undefined;
-            const data = await client.getTaxonomyPrices(derivativeId, effectiveDate);
+            const cacheKey = `taxonomy:prices:${derivativeId}:${effectiveDate}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyPrices(derivativeId, effectiveDate);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, prices: data?.prices || [] });
         }
 
@@ -101,7 +132,12 @@ async function handleTaxonomy(req: NextRequest) {
             const filters: Record<string, string> = {};
             ['generationId', 'modelId', 'makeId', 'vehicleType', 'fuelType', 'transmission', 'trim', 'productionStatus']
                 .forEach(k => { const v = searchParams.get(k); if (v) filters[k] = v; });
-            const data = await client.getTaxonomyFacet(resource, filters);
+            const cacheKey = `taxonomy:facet:${resource}:${JSON.stringify(filters)}`;
+            let data = ATCache.get(cacheKey);
+            if (!data) {
+                data = await client.getTaxonomyFacet(resource, filters);
+                ATCache.set(cacheKey, data, TTL.TAXONOMY);
+            }
             return NextResponse.json({ ok: true, [resource]: data?.[resource] || [] });
         }
 

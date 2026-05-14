@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 /**
  * GET /api/vehicles/optional-extras?vrm=XX
@@ -46,8 +47,13 @@ async function handleOptionalExtras(req: NextRequest) {
         await client.init();
 
         // AT returns { vehicle: {...}, features: [...] } at the TOP LEVEL
-        // features[] is a sibling of vehicle, NOT nested inside it
-        const responseData = await client.lookupVehicle(vrm);
+        // Reuse lookup cache — same AT call as /api/vehicles/lookup
+        const cacheKey = `vrm:lookup:${vrm.toUpperCase()}`;
+        let responseData = ATCache.get(cacheKey);
+        if (!responseData) {
+            responseData = await client.lookupVehicle(vrm);
+            if (responseData?.vehicle) ATCache.set(cacheKey, responseData, TTL.VRM_LOOKUP);
+        }
         const v = responseData.vehicle;
 
         if (!v) {

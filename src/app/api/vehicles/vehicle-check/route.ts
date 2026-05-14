@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache, TTL } from '@/lib/at-cache';
 
 /** Cache DVSA OAuth2 token to avoid fetching on every request */
 let dvsaTokenCache: { token: string; expiresAt: number } | null = null;
@@ -149,14 +150,21 @@ async function getVehicleCheck(req: NextRequest) {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        // Run AT, DVLA, and DVSA MOT History calls in parallel
+        // Run AT, DVLA, and DVSA MOT History calls in parallel (AT result cached 24hr)
+        const atCacheKey = `vrm:check:${vrm.toUpperCase()}`;
         const [responseData, dvlaTax, dvsaMotTests] = await Promise.all([
-            client.get('/vehicles', {
-                registration: vrm,
-                advertiserId: client.dealerId || '',
-                history: 'true',
-                fullVehicleCheck: 'true',
-            }),
+            (async () => {
+                const cached = ATCache.get(atCacheKey);
+                if (cached) return cached;
+                const fresh = await client.get('/vehicles', {
+                    registration: vrm,
+                    advertiserId: client.dealerId || '',
+                    history: 'true',
+                    fullVehicleCheck: 'true',
+                });
+                if (fresh?.vehicle) ATCache.set(atCacheKey, fresh, TTL.VRM_CHECK);
+                return fresh;
+            })(),
             fetchDvlaTax(vrm),
             fetchDvsaMotHistory(vrm),
         ]);
