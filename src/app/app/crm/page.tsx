@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 
 type Customer = {
@@ -32,6 +33,7 @@ type Lead = {
     vehicleId?: any;
     vehicle?: { stockId?: string; searchId?: string };
     stock?: { stockId?: string; vrm?: string; make?: string; model?: string };
+    price?: { suppliedPrice?: { amountGBP: number }; totalPrice?: { amountGBP: number } };
     intentScore?: number;
     intentLevel?: string;
     messagesId?: string;
@@ -60,6 +62,14 @@ function getAvatarColor(name: string) {
     return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
 }
 
+function EditIcon() {
+    return (
+        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+    );
+}
+
 function CRMContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -77,18 +87,16 @@ function CRMContent() {
     const [newMessage, setNewMessage] = useState('');
     const chatEndRef = useRef<HTMLDivElement>(null);
 
-    const [showFilter, setShowFilter] = useState(false);
     const [showQuickInsert, setShowQuickInsert] = useState(false);
     const [showActions, setShowActions] = useState(false);
     const [sendVia, setSendVia] = useState('Email Templ');
-    const [includeThread, setIncludeThread] = useState(false);
 
     const [closeModalLead, setCloseModalLead] = useState<Lead | null>(null);
     const [cancellationReason, setCancellationReason] = useState('Different Vehicle');
     const [isClosingDeal, setIsClosingDeal] = useState(false);
 
     const [showCreateLead, setShowCreateLead] = useState(false);
-    const [createLeadForm, setCreateLeadForm] = useState({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No', avatarColor: '#3eb6cd' });
+    const [createLeadForm, setCreateLeadForm] = useState({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No' });
     const [isCreatingLead, setIsCreatingLead] = useState(false);
 
     const [showAcknowledgeNew, setShowAcknowledgeNew] = useState(false);
@@ -169,7 +177,15 @@ function CRMContent() {
                         case 'Cancelled': s = 'LOST'; break;
                         default: s = 'NEW_LEAD';
                     }
-                    return { id: d.dealId, dealId: d.dealId, source: 'AutoTrader' as const, status: s, advertiserDealStatus: d.advertiserDealStatus, created: d.created, lastUpdated: d.lastUpdated, customer: d.consumer, stock: d.stock, intentScore: d.buyingSignals?.dealIntentScore, intentLevel: d.buyingSignals?.intent, messagesId: d.messages?.id ?? null };
+                    return {
+                        id: d.dealId, dealId: d.dealId, source: 'AutoTrader' as const,
+                        status: s, advertiserDealStatus: d.advertiserDealStatus,
+                        created: d.created, lastUpdated: d.lastUpdated,
+                        customer: d.consumer, stock: d.stock, price: d.price,
+                        intentScore: d.buyingSignals?.dealIntentScore,
+                        intentLevel: d.buyingSignals?.intent,
+                        messagesId: d.messages?.id ?? null,
+                    };
                 });
                 const ids = new Set(mapped.map((d: any) => d.dealId));
                 allLeads = [...allLeads.filter(l => !l.dealId || !ids.has(l.dealId)), ...mapped];
@@ -190,7 +206,7 @@ function CRMContent() {
                 const data = await res.json();
                 if (data.ok) {
                     setChatHistory(data.history || []);
-                    fetch(`/api/crm/chat/autotrader/${lead.messagesId}`, { method: 'PATCH' }).catch(() => {});
+                    fetch(`/api/crm/chat/autotrader/${lead.messagesId}`, { method: 'PATCH' }).catch(() => { });
                 }
             } catch { toast.error('Failed to load chat history.'); }
             finally { setChatLoading(false); }
@@ -203,10 +219,16 @@ function CRMContent() {
         if (!newMessage.trim() || !selectedLead) return;
         if (selectedLead.source === 'AutoTrader') {
             try {
-                const res = await fetch(`/api/crm/chat/autotrader/${selectedLead.messagesId || 'new'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: newMessage, dealId: selectedLead.dealId }) });
+                const res = await fetch(`/api/crm/chat/autotrader/${selectedLead.messagesId || 'new'}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: newMessage, dealId: selectedLead.dealId }),
+                });
                 const data = await res.json();
-                if (data.ok) { setChatHistory(prev => [...prev, { sender: 'dealer', text: newMessage, timestamp: new Date().toISOString() }]); setNewMessage(''); toast.success('Message sent!'); }
-                else toast.error(data.error || 'Failed to send.');
+                if (data.ok) {
+                    setChatHistory(prev => [...prev, { sender: 'dealer', text: newMessage, timestamp: new Date().toISOString() }]);
+                    setNewMessage('');
+                    toast.success('Message sent!');
+                } else toast.error(data.error || 'Failed to send.');
             } catch { toast.error('Connection error.'); }
         } else {
             setChatHistory(prev => [...prev, { sender: 'dealer', text: newMessage, timestamp: new Date().toISOString() }]);
@@ -250,7 +272,7 @@ function CRMContent() {
             const data = await res.json();
             if (!data.ok) throw new Error(data.error);
             toast.success('Lead created'); setShowCreateLead(false);
-            setCreateLeadForm({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No', avatarColor: '#3eb6cd' });
+            setCreateLeadForm({ leadType: 'Enquiry', name: '', email: '', sms: '', phone: '', preferredMethod: 'Email', marketingConsent: 'No' });
             fetchLeads();
         } catch (err: any) { toast.error(err.message || 'Failed'); }
         finally { setIsCreatingLead(false); }
@@ -266,16 +288,15 @@ function CRMContent() {
         finally { setIsAcknowledgingAll(false); }
     };
 
-    const getStatusStr = (s: any) => !s ? '' : typeof s === 'object' ? (s.name || s.value || '') : String(s);
-
     const getStatusBadge = (status: any) => {
-        const s = getStatusStr(status).toUpperCase();
-        if (s === 'NEW_LEAD') return { label: 'New Lead', cls: 'bg-emerald-500 text-white' };
+        const s = (!status ? '' : typeof status === 'object' ? (status.name || status.value || '') : String(status)).toUpperCase();
+        if (s === 'NEW_LEAD') return { label: 'New Message', cls: 'bg-emerald-500 text-white' };
         if (s === 'ACKNOWLEDGED') return { label: 'Acknowledged', cls: 'bg-[#3eb6cd] text-white' };
         if (s === 'IN_PROGRESS') return { label: 'In Progress', cls: 'bg-blue-500 text-white' };
         if (s === 'WON') return { label: 'Won', cls: 'bg-green-600 text-white' };
-        if (s === 'LOST' || s === 'CLOSED') return { label: s === 'LOST' ? 'Lost' : 'Closed', cls: 'bg-slate-300 text-slate-600' };
-        return { label: s.replace(/_/g, ' '), cls: 'bg-slate-200 text-slate-600' };
+        if (s === 'LOST') return { label: 'Lost', cls: 'bg-slate-300 text-slate-600' };
+        if (s === 'CLOSED') return { label: 'Closed', cls: 'bg-slate-300 text-slate-600' };
+        return { label: s.replace(/_/g, ' ') || 'Enquiry', cls: 'bg-slate-200 text-slate-600' };
     };
 
     const getTimeAgo = (d?: string) => {
@@ -285,7 +306,7 @@ function CRMContent() {
         if (m < 1) return 'just now';
         if (m < 60) return `${m} minutes ago`;
         const h = Math.floor(m / 60);
-        if (h < 24) return `${h} hours ago`;
+        if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`;
         const days = Math.floor(h / 24);
         if (days === 1) return 'Yesterday';
         return `${days} days ago`;
@@ -312,6 +333,11 @@ function CRMContent() {
         return c?.email || lead.customer?.email || '';
     };
 
+    const getCustomerPhone = (lead: Lead) => {
+        const c = lead.customerId as Customer;
+        return c?.phone || lead.customer?.phone || '';
+    };
+
     const filteredLeads = useMemo(() => leads.filter(l => {
         if (filterChannel !== 'All' && l.source !== filterChannel) return false;
         if (filterStatus !== 'All') {
@@ -325,9 +351,7 @@ function CRMContent() {
         }
         if (filterSearch) {
             const q = filterSearch.toLowerCase();
-            const name = getCustomerName(l).toLowerCase();
-            const email = getCustomerEmail(l).toLowerCase();
-            if (!name.includes(q) && !email.includes(q)) return false;
+            if (!getCustomerName(l).toLowerCase().includes(q) && !getCustomerEmail(l).toLowerCase().includes(q)) return false;
         }
         if (filterUpdatedIn !== 'All Time') {
             const ts = new Date(l.lastUpdated || l.createdAt || l.created || 0).getTime();
@@ -340,185 +364,275 @@ function CRMContent() {
 
     const isClosed = selectedLead?.source === 'AutoTrader' && ['Completed', 'Cancelled'].includes(selectedLead?.advertiserDealStatus || '');
     const noMessages = selectedLead?.source === 'AutoTrader' && !selectedLead?.messagesId;
-    const selectedBadge = selectedLead ? getStatusBadge(selectedLead.status) : null;
     const selectedName = selectedLead ? getCustomerName(selectedLead) : '';
     const selectedEmail = selectedLead ? getCustomerEmail(selectedLead) : '';
+    const selectedPhone = selectedLead ? getCustomerPhone(selectedLead) : '';
     const selectedInitials = selectedLead ? getCustomerInitials(selectedLead) : '';
-    const selectedAvatarColor = selectedName !== 'Unknown Lead' && selectedName ? getAvatarColor(selectedName) : '#9ca3af';
+    const selectedAvatarColor = selectedName && selectedName !== 'Unknown Lead' ? getAvatarColor(selectedName) : '#9ca3af';
+
+    const filterControls = [
+        { label: 'Updated In', val: filterUpdatedIn, set: setFilterUpdatedIn, opts: ['Last 7 Days', 'Last 30 Days', 'All Time'] },
+        { label: 'Type', val: filterType, set: setFilterType, opts: ['All', 'Enquiry', 'Callback', 'Chat', 'Walk-in', 'Test Drive', 'Finance', 'Deal Builder'] },
+        { label: 'Channel', val: filterChannel, set: setFilterChannel, opts: ['All', 'AutoTrader', 'Chat', 'Website', 'Email', 'SMS', 'Phone', 'WhatsApp', 'Facebook', 'Manual'] },
+        { label: 'Status', val: filterStatus, set: setFilterStatus, opts: ['All', 'New Lead', 'Acknowledged', 'In Progress', 'Won', 'Lost', 'Closed'] },
+        { label: 'Assigned To', val: filterAssignedTo, set: setFilterAssignedTo, opts: ['All', 'Not Assigned', 'Me'] },
+    ];
+
+    // ── Shared: Narrow lead list rows (used in lead-selected state) ──────────────
+    const NarrowLeadList = () => (
+        <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-slate-100">
+            {loading ? (
+                <div className="flex justify-center p-6"><div className="w-5 h-5 border-4 border-slate-100 border-t-[#3eb6cd] rounded-full animate-spin" /></div>
+            ) : filteredLeads.map((lead, idx) => {
+                const isSelected = selectedLead?.dealId === lead.dealId || (selectedLead?._id && selectedLead._id === lead._id);
+                const name = getCustomerName(lead);
+                const initials = getCustomerInitials(lead);
+                const badge = getStatusBadge(lead.status);
+                const avatarColor = name === 'Unknown Lead' ? '#9ca3af' : getAvatarColor(name);
+                const isNew = (lead.status || '').toUpperCase().includes('NEW');
+                return (
+                    <div
+                        key={lead._id || lead.dealId || idx}
+                        onClick={() => openChat(lead)}
+                        className={`flex items-start gap-2 px-3 py-2.5 cursor-pointer border-l-[3px] transition-colors ${isSelected ? 'bg-slate-50 border-[#3eb6cd]' : 'border-transparent hover:bg-slate-50/60'}`}
+                    >
+                        <div style={{ backgroundColor: avatarColor }} className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[11px] shrink-0 mt-0.5">
+                            {initials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-slate-800 text-[12px] truncate">{name === 'Unknown Lead' ? `Lead #${(lead._id || lead.dealId || '').slice(-3)}` : name}</p>
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                <span className="text-[9px] text-slate-400">{lead.platform || lead.source}</span>
+                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>
+                                    {badge.label.length > 5 ? badge.label.slice(0, 5) + '...' : badge.label}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isNew ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                <span className="text-[9px] text-slate-400">{getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
 
     return (
         <div className="w-full h-[calc(100vh-60px)] bg-white flex flex-col font-sans -mt-8 pt-8 overflow-hidden">
             <div className="flex-1 flex overflow-hidden min-h-0">
 
-                {/* ══ COL 1: Leads List ══ */}
-                <div className="w-[240px] flex flex-col border-r border-slate-200 shrink-0 min-h-0 bg-white">
-                    {/* Header */}
-                    <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
-                        <span className="font-bold text-slate-800 text-[14px]">Leads & Chat</span>
-                        <button
-                            onClick={() => setShowFilter(f => !f)}
-                            className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded border transition-colors ${showFilter ? 'bg-[#3eb6cd] text-white border-[#3eb6cd]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                        >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" /></svg>
-                            Filter
-                        </button>
-                    </div>
+                {!selectedLead ? (
+                    // ══ NO LEAD SELECTED: Wide list + Filters sidebar ══════════════════
+                    <>
+                        {/* Wide Leads List */}
+                        <div className="flex-1 flex flex-col min-h-0 border-r border-slate-200">
+                            {/* Header */}
+                            <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between shrink-0">
+                                <span className="font-bold text-slate-800 text-[16px]">Leads & Chat</span>
+                                <div className="flex items-center gap-2">
+                                    <button className="flex items-center gap-1.5 border border-slate-200 px-3 py-1.5 rounded-lg text-[12px] text-slate-500 hover:bg-slate-50 font-semibold">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth="2" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01" /></svg>
+                                        Help
+                                    </button>
+                                    <button className="flex items-center gap-1.5 border border-slate-200 px-3 py-1.5 rounded-lg text-[12px] text-slate-500 hover:bg-slate-50 font-semibold">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" strokeWidth="2" /></svg>
+                                        Settings
+                                    </button>
+                                </div>
+                            </div>
 
-                    {showFilter ? (
-                        /* ── Filter Panel ── */
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                            {[
-                                { label: 'Updated In', val: filterUpdatedIn, set: setFilterUpdatedIn, opts: ['Last 7 Days', 'Last 30 Days', 'All Time'] },
-                                { label: 'Type', val: filterType, set: setFilterType, opts: ['All', 'Enquiry', 'Callback', 'Chat', 'Walk-in', 'Test Drive', 'Finance', 'Deal Builder', 'Guaranteed Part Exchange'] },
-                                { label: 'Channel', val: filterChannel, set: setFilterChannel, opts: ['All', 'AutoTrader', 'Chat', 'Website', 'Email', 'SMS', 'Phone', 'WhatsApp', 'Facebook', 'Instagram', 'Manual'] },
-                                { label: 'Status', val: filterStatus, set: setFilterStatus, opts: ['All', 'New Lead', 'Acknowledged', 'In Progress', 'Won', 'Lost', 'Closed'] },
-                                { label: 'Assigned To', val: filterAssignedTo, set: setFilterAssignedTo, opts: ['All', 'Not Assigned', 'Me'] },
-                            ].map(f => (
-                                <div key={f.label}>
-                                    <label className="block text-[10px] font-semibold text-slate-500 mb-1">{f.label}</label>
-                                    <select value={f.val} onChange={e => f.set(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#3eb6cd]">
-                                        {f.opts.map(o => <option key={o}>{o}</option>)}
+                            {/* Lead Rows */}
+                            <div className="flex-1 overflow-y-auto min-h-0">
+                                {loading ? (
+                                    <div className="flex justify-center items-center h-32">
+                                        <div className="w-6 h-6 border-4 border-slate-100 border-t-[#3eb6cd] rounded-full animate-spin" />
+                                    </div>
+                                ) : filteredLeads.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                                        <p className="text-[13px]">No leads found</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-slate-100">
+                                        {filteredLeads.map((lead, idx) => {
+                                            const name = getCustomerName(lead);
+                                            const initials = getCustomerInitials(lead);
+                                            const badge = getStatusBadge(lead.status);
+                                            const avatarColor = name === 'Unknown Lead' ? '#9ca3af' : getAvatarColor(name);
+                                            const isNew = (lead.status || '').toUpperCase().includes('NEW');
+                                            const displayName = name === 'Unknown Lead' ? `Lead #${(lead._id || lead.dealId || '').slice(-3)}` : name;
+                                            const leadType = lead.advertiserDealStatus ? 'Enquiry' : (lead.platform || lead.source || 'Enquiry');
+
+                                            return (
+                                                <div
+                                                    key={lead._id || lead.dealId || idx}
+                                                    onClick={() => openChat(lead)}
+                                                    className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 cursor-pointer group"
+                                                >
+                                                    {/* Avatar */}
+                                                    <div style={{ backgroundColor: avatarColor }} className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-[13px] shrink-0">
+                                                        {initials}
+                                                    </div>
+                                                    {/* Name + Type */}
+                                                    <div className="w-40 shrink-0">
+                                                        <p className="text-[13px] font-semibold text-slate-800 truncate">{displayName}</p>
+                                                        <p className="text-[11px] text-slate-400">{leadType}</p>
+                                                    </div>
+                                                    {/* Status Badge */}
+                                                    <div className="w-32 shrink-0">
+                                                        <span className={`inline-block px-2.5 py-1 rounded text-[11px] font-semibold ${badge.cls}`}>
+                                                            {badge.label}
+                                                        </span>
+                                                    </div>
+                                                    {/* Dot + Time */}
+                                                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                                                        <div className={`w-2 h-2 rounded-full shrink-0 ${isNew ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                                        <span className="text-[12px] text-slate-500 truncate">{getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}</span>
+                                                    </div>
+                                                    {/* Assign */}
+                                                    <select
+                                                        onClick={e => e.stopPropagation()}
+                                                        className="border border-slate-200 rounded px-2 py-1.5 text-[11px] text-slate-500 bg-white focus:outline-none shrink-0"
+                                                    >
+                                                        <option>Assign</option>
+                                                        <option>Me</option>
+                                                    </select>
+                                                    {/* Acknowledge (new leads only) */}
+                                                    {isNew && (
+                                                        <button
+                                                            onClick={e => handleAcknowledge(e, lead)}
+                                                            className="border border-slate-200 px-3 py-1.5 rounded text-[11px] font-semibold text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+                                                        >
+                                                            Acknowledge
+                                                        </button>
+                                                    )}
+                                                    {/* Close */}
+                                                    <button
+                                                        onClick={e => handleCloseDeal(e, lead)}
+                                                        className="border border-slate-200 px-3 py-1.5 rounded text-[11px] font-semibold text-slate-600 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors shrink-0"
+                                                    >
+                                                        Close
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Bottom bar */}
+                            <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-3 shrink-0">
+                                <button onClick={() => setShowCreateLead(true)} className="px-5 py-2 bg-[#3eb6cd] text-white text-[13px] font-bold rounded-lg hover:bg-[#37a3b8] transition-colors">
+                                    Create New Lead
+                                </button>
+                                <button onClick={() => setShowAcknowledgeNew(true)} className="px-5 py-2 border border-slate-300 text-slate-600 text-[13px] font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+                                    Acknowledge New
+                                </button>
+                                <button className="ml-auto text-slate-400 hover:text-slate-600 p-1">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.536 8.464a5 5 0 010 7.072M12 6a7 7 0 010 14M12 6a7 7 0 000 14m0-14v14" /></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Filters Sidebar */}
+                        <div className="w-[280px] border-l border-slate-200 flex flex-col shrink-0">
+                            <div className="px-5 py-3 border-b border-slate-200 shrink-0">
+                                <span className="font-bold text-slate-800 text-[16px]">Filters</span>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                                {filterControls.map(f => (
+                                    <div key={f.label}>
+                                        <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">{f.label}</label>
+                                        <select value={f.val} onChange={e => f.set(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] text-slate-700 bg-white focus:outline-none focus:border-[#3eb6cd] appearance-none">
+                                            {f.opts.map(o => <option key={o}>{o}</option>)}
+                                        </select>
+                                    </div>
+                                ))}
+                                <div>
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">Tags</label>
+                                    <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] text-slate-400 bg-white focus:outline-none focus:border-[#3eb6cd] appearance-none">
+                                        <option>Nothing selected</option>
                                     </select>
                                 </div>
-                            ))}
-                            <div>
-                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Tags</label>
-                                <select className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#3eb6cd]">
-                                    <option>Nothing selected</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Name, Email or Phone</label>
-                                <input type="text" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} className="w-full text-[11px] border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#3eb6cd]" />
-                            </div>
-                            <div className="flex items-center gap-1 pt-1 text-slate-400 text-[11px] justify-center">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                            </div>
-                        </div>
-                    ) : (
-                        /* ── Lead List ── */
-                        <div className="flex-1 overflow-y-auto">
-                            {loading ? (
-                                <div className="flex justify-center p-8"><div className="w-6 h-6 border-4 border-slate-100 border-t-[#3eb6cd] rounded-full animate-spin" /></div>
-                            ) : filteredLeads.length === 0 ? (
-                                <div className="p-6 text-center text-slate-400 text-[12px]">No leads found.</div>
-                            ) : (
-                                <div className="divide-y divide-slate-100">
-                                    {filteredLeads.map(lead => {
-                                        const isSelected = selectedLead?.dealId === lead.dealId || (selectedLead?._id && selectedLead._id === lead._id);
-                                        const name = getCustomerName(lead);
-                                        const initials = getCustomerInitials(lead);
-                                        const badge = getStatusBadge(lead.status);
-                                        const avatarColor = name === 'Unknown Lead' ? '#9ca3af' : getAvatarColor(name);
-                                        const isNew = (lead.status || '').toUpperCase().includes('NEW');
-
-                                        return (
-                                            <div
-                                                key={lead._id || lead.dealId}
-                                                onClick={() => openChat(lead)}
-                                                className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer border-l-[3px] transition-colors ${isSelected ? 'bg-slate-50 border-[#3eb6cd]' : 'border-transparent hover:bg-slate-50/60'}`}
-                                            >
-                                                <div style={{ backgroundColor: avatarColor }} className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-[12px] shrink-0 mt-0.5">
-                                                    {initials}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="font-semibold text-slate-800 text-[13px] truncate">{name === 'Unknown Lead' ? `Lead #${(lead._id || lead.dealId || '').slice(-3)}` : name}</div>
-                                                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                                                        <span className="text-[10px] text-slate-400">{lead.platform || lead.source || 'Enquiry'}</span>
-                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.label.slice(0, 6)}{badge.label.length > 6 ? '...' : ''}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1 mt-0.5">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${isNew ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                                        <span className="text-[10px] text-slate-400">{getTimeAgo(lead.lastUpdated || lead.createdAt || lead.created)}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                                <div>
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">Name, Email or Phone</label>
+                                    <input type="text" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} placeholder="Search..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-[#3eb6cd]" />
                                 </div>
-                            )}
+                            </div>
                         </div>
-                    )}
+                    </>
+                ) : (
+                    // ══ LEAD SELECTED: 4-column layout ═══════════════════════════════
+                    <>
+                        {/* COL 1: Narrow list */}
+                        <div className="w-[220px] flex flex-col border-r border-slate-200 shrink-0 min-h-0 bg-white">
+                            <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
+                                <span className="font-bold text-slate-800 text-[14px]">Leads & Chat</span>
+                                <button onClick={() => setSelectedLead(null)} className="flex items-center gap-1 border border-slate-200 px-2 py-1 rounded text-[11px] text-slate-500 hover:bg-slate-50">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" /></svg>
+                                    Filter
+                                </button>
+                            </div>
+                            <NarrowLeadList />
+                            <div className="p-3 border-t border-slate-200 shrink-0">
+                                <button onClick={() => setShowCreateLead(true)} className="w-full py-2 bg-[#3eb6cd] text-white text-[12px] font-bold rounded-lg hover:bg-[#37a3b8]">
+                                    Create New Lead
+                                </button>
+                            </div>
+                        </div>
 
-                    {/* Bottom */}
-                    <div className="p-3 border-t border-slate-200 flex items-center gap-2 shrink-0">
-                        <button onClick={() => setShowCreateLead(true)} className="flex-1 py-2 bg-[#3eb6cd] text-white text-[12px] font-bold rounded-lg hover:bg-[#37a3b8] transition-colors">
-                            Create New Lead
-                        </button>
-                        <button title="Mute notifications" className="p-1.5 text-slate-400 hover:text-slate-600">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.536 8.464a5 5 0 010 7.072M12 6a7 7 0 010 14M12 6a7 7 0 000 14m0-14v14" /></svg>
-                        </button>
-                    </div>
-                </div>
-
-                {/* ══ COL 2: Chat / Enquiry ══ */}
-                <div className="flex-1 flex flex-col border-r border-slate-200 min-w-0 min-h-0 bg-white">
-                    {selectedLead ? (
-                        <>
-                            {/* Chat Header */}
+                        {/* COL 2: Chat / Enquiry */}
+                        <div className="flex-1 flex flex-col border-r border-slate-200 min-w-0 min-h-0 bg-white">
+                            {/* Header */}
                             <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between shrink-0">
-                                <h2 className="text-[15px] font-bold text-slate-800">{selectedLead.platform || (selectedLead.source === 'AutoTrader' ? 'AutoTrader' : 'Enquiry')}</h2>
+                                <h2 className="text-[15px] font-bold text-slate-800">Enquiry</h2>
                                 <div className="flex items-center gap-2">
-                                    <button className="flex items-center gap-1.5 border border-[#3eb6cd] text-[#3eb6cd] text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-[#3eb6cd]/5 transition-colors">
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                                        {selectedLead.source === 'AutoTrader' ? 'Chat' : 'Email'}
-                                    </button>
-                                    {selectedBadge && (
-                                        <button className={`text-[12px] font-semibold px-3 py-1.5 rounded-lg ${selectedBadge.cls}`}>
-                                            {selectedBadge.label}
-                                        </button>
+                                    {selectedLead.source === 'AutoTrader' && (
+                                        <span className="flex items-center gap-1.5 bg-[#3eb6cd]/10 text-[#3eb6cd] text-[11px] font-bold px-2.5 py-1 rounded-full border border-[#3eb6cd]/20">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" /></svg>
+                                            AutoTrader
+                                        </span>
                                     )}
+                                    <button className="flex items-center gap-1.5 bg-emerald-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition-colors">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                                        New Message
+                                    </button>
                                 </div>
                             </div>
 
-                            {/* Message Area */}
-                            <div className="flex-1 overflow-y-auto min-h-0">
+                            {/* Messages */}
+                            <div className="flex-1 overflow-y-auto min-h-0 p-4">
                                 {chatLoading ? (
-                                    <div className="flex justify-center py-10"><div className="w-6 h-6 border-4 border-slate-200 border-t-[#3eb6cd] rounded-full animate-spin" /></div>
+                                    <div className="flex justify-center py-10">
+                                        <div className="w-6 h-6 border-4 border-slate-200 border-t-[#3eb6cd] rounded-full animate-spin" />
+                                    </div>
                                 ) : chatHistory.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-center p-10">
+                                    <div className="flex flex-col items-center justify-center h-full text-center">
                                         <div className="w-12 h-12 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center mb-3">
                                             <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                                         </div>
                                         <p className="text-slate-400 text-[13px]">No messages yet.</p>
+                                        {noMessages && <p className="text-slate-300 text-[11px] mt-1">Consumer has not started a conversation.</p>}
                                     </div>
-                                ) : selectedLead.source === 'AutoTrader' ? (
-                                    /* AutoTrader: chat bubble style */
-                                    <>
-                                        {chatHistory.map((msg, idx) => (
-                                            <div key={idx} className={`flex p-4 gap-3 ${idx === 0 ? 'pt-5' : ''} ${msg.sender === 'dealer' ? 'justify-end' : 'justify-start'}`}>
-                                                {msg.sender === 'customer' && (
-                                                    <div style={{ backgroundColor: selectedAvatarColor }} className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[11px] shrink-0 mt-0.5">
-                                                        {selectedInitials}
-                                                    </div>
-                                                )}
-                                                <div className={`max-w-[75%] flex flex-col ${msg.sender === 'dealer' ? 'items-end' : 'items-start'}`}>
-                                                    <div className={`px-4 py-3 text-[13px] leading-relaxed rounded-2xl border bg-white text-slate-800 border-slate-200 ${msg.sender === 'dealer' ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-                                                        {msg.text}
-                                                    </div>
-                                                    <div className="flex items-center gap-1 mt-1">
-                                                        {msg.sender === 'dealer' && <svg className="w-3 h-3 text-[#3eb6cd]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>}
-                                                        <span className="text-[10px] text-slate-400">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div ref={chatEndRef} />
-                                    </>
                                 ) : (
-                                    /* Email / Local: show as formatted email body */
-                                    <div className="p-5">
+                                    <div className="space-y-3 max-w-2xl">
                                         {chatHistory.map((msg, idx) => (
-                                            <div key={idx} className={`mb-5 ${msg.sender === 'dealer' ? 'pl-6 border-l-2 border-[#3eb6cd]/40' : ''}`}>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <div style={{ backgroundColor: msg.sender === 'dealer' ? '#3eb6cd' : selectedAvatarColor }} className="w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] shrink-0">
-                                                        {msg.sender === 'dealer' ? 'ME' : selectedInitials}
+                                            <div key={idx} className={`border rounded-xl overflow-hidden ${msg.sender === 'dealer' ? 'border-[#3eb6cd]/30' : 'border-slate-200'}`}>
+                                                <div className={`px-4 py-2 flex items-center justify-between border-b ${msg.sender === 'dealer' ? 'bg-[#3eb6cd]/5 border-[#3eb6cd]/20' : 'bg-slate-50 border-slate-100'}`}>
+                                                    <div className="flex items-center gap-2">
+                                                        <div style={{ backgroundColor: msg.sender === 'dealer' ? '#3eb6cd' : selectedAvatarColor }} className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold text-[8px] shrink-0">
+                                                            {msg.sender === 'dealer' ? 'ME' : selectedInitials}
+                                                        </div>
+                                                        <span className="text-[12px] font-semibold text-slate-700">{msg.sender === 'dealer' ? 'You' : selectedName}</span>
                                                     </div>
-                                                    <span className="text-[11px] text-slate-400">{new Date(msg.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                                    <div className="flex items-center gap-1.5 text-slate-400">
+                                                        <span className="text-[11px]">{getTimeAgo(msg.timestamp)}</span>
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                                                    </div>
                                                 </div>
-                                                <div className="text-[13px] text-slate-800 leading-relaxed whitespace-pre-wrap pl-9">{msg.text}</div>
+                                                <div className="px-4 py-3">
+                                                    <p className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                                                </div>
                                             </div>
                                         ))}
                                         <div ref={chatEndRef} />
@@ -526,19 +640,14 @@ function CRMContent() {
                                 )}
                             </div>
 
-                            {/* Input — always at bottom */}
+                            {/* Reply area */}
                             {isClosed ? (
-                                <div className="p-3 border-t border-slate-200 text-center text-[12px] text-slate-400 bg-slate-50">
+                                <div className="p-3 border-t border-slate-200 text-center text-[12px] text-slate-400 bg-slate-50 shrink-0">
                                     Deal is {selectedLead.advertiserDealStatus} — messaging disabled.
-                                </div>
-                            ) : noMessages ? (
-                                <div className="p-3 border-t border-slate-200 text-center text-[12px] text-slate-400 bg-slate-50">
-                                    Consumer has not started a conversation.
                                 </div>
                             ) : (
                                 <div className="border-t border-slate-200 shrink-0">
-                                    {/* Action row */}
-                                    <div className="px-3 pt-2.5 pb-1.5 flex items-center justify-between">
+                                    <div className="px-4 pt-2.5 pb-1.5 flex items-center justify-between">
                                         <select className="text-[11px] border border-slate-200 rounded px-2 py-1 bg-white text-slate-500 focus:outline-none">
                                             <option>Assign</option><option>Me</option>
                                         </select>
@@ -561,25 +670,25 @@ function CRMContent() {
                                                 </button>
                                                 {showActions && (
                                                     <div className="absolute bottom-full right-0 mb-1 w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-30">
-                                                        <button onClick={(e) => { handleAcknowledge(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-slate-700 hover:bg-slate-50 border-b border-slate-50">Acknowledge</button>
-                                                        <button onClick={(e) => { handleCloseDeal(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-red-500 hover:bg-red-50">Close Lead</button>
+                                                        <button onClick={e => { handleAcknowledge(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-slate-700 hover:bg-slate-50 border-b border-slate-50">Acknowledge</button>
+                                                        <button onClick={e => { handleCloseDeal(e, selectedLead!); setShowActions(false); }} className="w-full text-left px-4 py-2.5 text-[12px] text-red-500 hover:bg-red-50">Close Lead</button>
                                                     </div>
                                                 )}
                                             </div>
                                         </div>
                                     </div>
-                                    {/* Textarea */}
-                                    <div className="px-3 pb-1">
-                                        <textarea rows={4} value={newMessage} maxLength={1500} onChange={e => setNewMessage(e.target.value)}
+                                    <div className="px-4 pb-1">
+                                        <textarea
+                                            rows={4} value={newMessage} maxLength={1500}
+                                            onChange={e => setNewMessage(e.target.value)}
                                             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
                                             placeholder="Type a message…"
                                             className="w-full border border-slate-200 rounded-lg p-3 text-[13px] resize-none outline-none text-slate-800 placeholder:text-slate-300 focus:border-[#3eb6cd] focus:ring-1 focus:ring-[#3eb6cd]/20"
                                         />
                                     </div>
-                                    {/* Send row */}
-                                    <div className="px-3 pb-3 flex items-center gap-2 flex-wrap">
+                                    <div className="px-4 pb-3 flex items-center gap-2">
                                         <button onClick={sendReply} disabled={!newMessage.trim()} className="px-4 py-1.5 bg-[#3eb6cd] text-white font-bold text-[13px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-40 transition-colors">Send</button>
-                                        <button title="Attach link" className="p-1.5 border border-slate-200 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-50">
+                                        <button className="p-1.5 border border-slate-200 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-50">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                                         </button>
                                         <span className="text-[11px] text-slate-400">via</span>
@@ -587,239 +696,206 @@ function CRMContent() {
                                             <option>Email Templ</option>
                                             <option>Chat</option>
                                             <option>SMS</option>
-                                            <option>WhatsApp</option>
                                         </select>
-                                        <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer">
-                                            <input type="checkbox" checked={includeThread} onChange={e => setIncludeThread(e.target.checked)} className="rounded border-slate-300 text-[#3eb6cd]" />
-                                            Include Thread
-                                        </label>
                                         <button className="ml-auto border border-slate-200 text-slate-600 text-[11px] font-semibold px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">Preview</button>
                                     </div>
                                 </div>
                             )}
-                        </>
-                    ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center p-10">
-                            <div className="w-14 h-14 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center mb-3">
-                                <svg className="w-7 h-7 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                            </div>
-                            <h3 className="text-[14px] font-bold text-slate-700 mb-1">Select a conversation</h3>
-                            <p className="text-[12px] text-slate-400">Choose a lead from the list to view messages.</p>
                         </div>
-                    )}
-                </div>
 
-                {/* ══ COL 3: Visitor Panel ══ */}
-                <div className="w-[280px] flex flex-col border-r border-slate-200 shrink-0 overflow-y-auto min-h-0 bg-white hidden lg:flex">
-                    {selectedLead ? (
-                        <>
+                        {/* COL 3: Visitor panel */}
+                        <div className="w-[240px] flex flex-col border-r border-slate-200 shrink-0 overflow-y-auto min-h-0 bg-white hidden lg:flex">
                             {/* Visitor */}
                             <div className="p-4 border-b border-slate-200">
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="font-bold text-slate-800 text-[14px]">Visitor</span>
-                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                        Edit
-                                    </button>
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="font-bold text-slate-800 text-[13px]">Visitor</span>
+                                    <button className="flex items-center gap-1 text-[10px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50"><EditIcon /> Edit</button>
                                 </div>
-                                {/* Avatar centered */}
                                 <div className="flex flex-col items-center mb-4">
-                                    <div style={{ backgroundColor: selectedAvatarColor }} className="w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg mb-2">
+                                    <div style={{ backgroundColor: selectedAvatarColor }} className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg mb-2">
                                         {selectedInitials}
                                     </div>
-                                    <p className="font-semibold text-slate-800 text-[14px]">{selectedName === 'Unknown Lead' ? 'Name Unknown' : selectedName}</p>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">{selectedLead.platform || selectedLead.source || 'Email'}</p>
+                                    <p className="font-semibold text-slate-800 text-[13px] text-center">{selectedName}</p>
+                                    <p className="text-[10px] text-slate-400 mt-0.5 text-center">
+                                        {[selectedEmail && 'Email', selectedPhone && 'SMS', selectedPhone && 'Phone', selectedLead.source === 'AutoTrader' && 'AutoTrader'].filter(Boolean).join(', ')}
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                        <span className="text-slate-400 w-20 shrink-0">Customer:</span>
+                                        <button
+                                            onClick={async () => {
+                                                setIsCreatingContact(true);
+                                                try {
+                                                    const [fn, ...rest] = (selectedName === 'Unknown Lead' ? 'Unknown' : selectedName).split(' ');
+                                                    const res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firstName: fn, lastName: rest.join(' ') || '', email: selectedEmail, source: selectedLead.source, status: 'Active' }) });
+                                                    const d = await res.json();
+                                                    if (d.ok) toast.success('Contact saved!'); else toast.error(d.error || 'Failed');
+                                                } catch { toast.error('Connection error'); }
+                                                finally { setIsCreatingContact(false); }
+                                            }}
+                                            disabled={isCreatingContact}
+                                            className="text-[#3eb6cd] hover:underline font-semibold disabled:opacity-50"
+                                        >
+                                            {isCreatingContact ? 'Saving…' : 'View Profile'}
+                                        </button>
+                                    </div>
                                     {selectedEmail && (
-                                        <div className="flex items-start gap-3 text-[12px]">
-                                            <span className="text-slate-400 w-12 shrink-0 pt-px">Email:</span>
+                                        <div className="flex items-start gap-2 text-[11px]">
+                                            <span className="text-slate-400 w-20 shrink-0">Email:</span>
                                             <a href={`mailto:${selectedEmail}`} className="text-[#3eb6cd] hover:underline break-all leading-snug">{selectedEmail}</a>
                                         </div>
                                     )}
-                                    {(() => { const c = selectedLead.customerId as Customer; const phone = c?.phone || selectedLead.customer?.phone; return phone ? (
-                                        <div className="flex items-center gap-3 text-[12px]">
-                                            <span className="text-slate-400 w-12 shrink-0">Phone:</span>
-                                            <a href={`tel:${phone}`} className="text-[#3eb6cd] hover:underline">{phone}</a>
+                                    {selectedPhone && (
+                                        <div className="flex items-center gap-2 text-[11px]">
+                                            <span className="text-slate-400 w-20 shrink-0">SMS:</span>
+                                            <a href={`tel:${selectedPhone}`} className="text-[#3eb6cd] hover:underline">{selectedPhone}</a>
                                         </div>
-                                    ) : null; })()}
-                                    <div className="flex items-center gap-3 text-[12px]">
-                                        <span className="text-slate-400 w-12 shrink-0">Source:</span>
+                                    )}
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                        <span className="text-slate-400 w-20 shrink-0">Preferred:</span>
+                                        <span className="text-slate-700">Email</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                        <span className="text-slate-400 w-20 shrink-0">Source:</span>
                                         <span className="text-slate-700">{selectedLead.source}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Link Contact */}
+                            {/* Vehicles of Interest */}
                             <div className="p-4 border-b border-slate-200">
                                 <div className="flex items-center justify-between mb-3">
-                                    <span className="font-bold text-slate-800 text-[14px]">Link Contact</span>
-                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                                        View
-                                    </button>
+                                    <span className="font-bold text-slate-800 text-[13px]">Vehicles of Interest</span>
+                                    <button className="flex items-center gap-1 text-[10px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50"><EditIcon /> Edit</button>
                                 </div>
-                                {selectedEmail ? (
-                                    /* Matched contact card */
+                                {selectedLead.stock ? (
                                     <div>
-                                        <p className="text-[11px] text-slate-500 mb-3">The following contact profile matches this visitor's email address:</p>
-                                        <div className="flex items-start gap-3 mb-4">
-                                            <div style={{ backgroundColor: selectedAvatarColor }} className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-[12px] shrink-0">
-                                                {selectedInitials}
-                                            </div>
-                                            <div>
-                                                <p className="font-semibold text-slate-800 text-[13px]">{selectedName === 'Unknown Lead' ? 'Name Unknown' : selectedName}</p>
-                                                {selectedEmail && <p className="text-[11px] text-slate-400 mt-0.5 break-all">{selectedEmail}</p>}
-                                            </div>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                                                {selectedLead.stock.vrm || selectedLead.stock.stockId?.slice(0, 8) || '—'}
+                                            </span>
+                                            <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">For Sale</span>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={async () => {
-                                                setIsCreatingContact(true);
-                                                try {
-                                                    const [firstName, ...rest] = (selectedName === 'Unknown Lead' ? 'Unknown' : selectedName).split(' ');
-                                                    const res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firstName, lastName: rest.join(' ') || '', email: selectedEmail, source: selectedLead.source, status: 'Active' }) });
-                                                    const data = await res.json();
-                                                    if (data.ok) toast.success('Contact linked!');
-                                                    else toast.error(data.error || 'Failed');
-                                                } catch { toast.error('Connection error'); }
-                                                finally { setIsCreatingContact(false); }
-                                            }} disabled={isCreatingContact} className="flex-1 py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-50 transition-colors flex items-center justify-center">
-                                                {isCreatingContact ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Link Contact'}
-                                            </button>
-                                            <button className="flex-1 py-2 bg-slate-600 text-white font-bold text-[12px] rounded-lg hover:bg-slate-700 transition-colors">
-                                                Ignore
-                                            </button>
+                                        <p className="text-[12px] font-semibold text-slate-700 mb-0.5">
+                                            {selectedLead.stock.make || ''} {selectedLead.stock.model || ''}
+                                        </p>
+                                        {selectedLead.price && (
+                                            <p className="text-[12px] font-bold text-[#3eb6cd] mb-2">
+                                                £{(selectedLead.price.totalPrice?.amountGBP || selectedLead.price.suppliedPrice?.amountGBP || 0).toLocaleString()}
+                                            </p>
+                                        )}
+                                        <div className="flex gap-1 mb-1 flex-wrap">
+                                            <Link href={`/app/vehicles/${selectedLead.stock.stockId}`} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">View</Link>
+                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Send Link</button>
+                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Media</button>
+                                        </div>
+                                        <div className="flex gap-1 flex-wrap">
+                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Create Order</button>
+                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Sell Vehicle</button>
                                         </div>
                                     </div>
                                 ) : (
-                                    /* No match — create new */
-                                    <div className="text-center py-3">
-                                        <p className="text-[12px] text-slate-500 mb-3">Would you like to create a customer profile for this visitor?</p>
-                                        <button onClick={async () => {
-                                            setIsCreatingContact(true);
-                                            try {
-                                                const [firstName, ...rest] = (selectedName === 'Unknown Lead' ? 'Unknown' : selectedName).split(' ');
-                                                const res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firstName, lastName: rest.join(' ') || '', email: selectedEmail, source: selectedLead.source, status: 'Active' }) });
-                                                const data = await res.json();
-                                                if (data.ok) toast.success('Contact created!');
-                                                else toast.error(data.error || 'Failed');
-                                            } catch { toast.error('Connection error'); }
-                                            finally { setIsCreatingContact(false); }
-                                        }} disabled={isCreatingContact} className="w-full py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] disabled:opacity-50 transition-colors flex items-center justify-center">
-                                            {isCreatingContact ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Create Contact'}
-                                        </button>
-                                    </div>
+                                    <p className="text-[12px] text-slate-400 italic">No vehicles</p>
                                 )}
                             </div>
 
-                            {/* Vehicles of Interest */}
-                            <div className="p-4 border-b border-slate-200">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="font-bold text-slate-800 text-[14px]">Vehicles of Interest</span>
-                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                        Edit
-                                    </button>
-                                </div>
-                                {selectedLead.stock ? (
-                                    <div className="text-[12px] text-slate-700">
-                                        <p className="font-semibold">{selectedLead.stock.make} {selectedLead.stock.model}</p>
-                                        {selectedLead.stock.vrm && <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">{selectedLead.stock.vrm}</span>}
+                            {/* Deals (AT leads only) */}
+                            {selectedLead.dealId && (
+                                <div className="p-4 border-b border-slate-200">
+                                    <span className="font-bold text-slate-800 text-[13px] block mb-2">Deals</span>
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <Link href={`/app/deals/${selectedLead.dealId}`} className="text-[12px] font-bold text-[#3eb6cd] hover:underline">
+                                                #{selectedLead.dealId.slice(-6).toUpperCase()}
+                                            </Link>
+                                            <p className="text-[10px] text-slate-400 mt-0.5">{selectedLead.source}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[11px] font-semibold text-slate-600">{selectedLead.advertiserDealStatus || 'Begin'}</p>
+                                            <p className="text-[10px] text-slate-400">{getTimeAgo(selectedLead.lastUpdated || selectedLead.created)}</p>
+                                        </div>
                                     </div>
-                                ) : (
-                                    <p className="text-[12px] text-slate-400 italic">No vehicles.</p>
-                                )}
-                            </div>
+                                </div>
+                            )}
 
                             {/* Tags */}
                             <div className="p-4">
                                 <div className="flex items-center justify-between mb-2">
-                                    <span className="font-bold text-slate-800 text-[14px]">Tags</span>
-                                    <button className="flex items-center gap-1 text-[11px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50">
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                        Edit
-                                    </button>
+                                    <span className="font-bold text-slate-800 text-[13px]">Tags</span>
+                                    <button className="flex items-center gap-1 text-[10px] border border-slate-200 px-2 py-1 rounded text-slate-500 hover:bg-slate-50"><EditIcon /> Edit</button>
                                 </div>
-                                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] text-slate-400 focus:outline-none focus:border-[#3eb6cd] bg-white">
+                                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-400 focus:outline-none focus:border-[#3eb6cd] bg-white">
                                     <option>Select Tags</option>
                                 </select>
                             </div>
-                        </>
-                    ) : (
-                        <div className="flex-1 flex items-center justify-center p-6 text-center">
-                            <p className="text-[12px] text-slate-300">Select a lead to view visitor details.</p>
                         </div>
-                    )}
-                </div>
 
-                {/* ══ COL 4: Appointments + Notes ══ */}
-                <div className="w-[240px] flex flex-col shrink-0 overflow-y-auto min-h-0 bg-white hidden xl:flex">
-                    {/* Appointments */}
-                    <div className="p-4 border-b border-slate-200">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="font-bold text-slate-800 text-[14px]">Appointments</span>
-                            <select value={appointmentReminder} onChange={e => setAppointmentReminder(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none text-slate-500">
-                                <option>Reminder</option>
-                                <option>No Reminder</option>
-                            </select>
-                        </div>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Type</label>
-                                <select value={appointmentType} onChange={e => setAppointmentType(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
-                                    <option>Appointment</option>
-                                    <option>Test Drive</option>
-                                    <option>Viewing</option>
-                                    <option>Callback</option>
-                                </select>
-                            </div>
-                            <div>
-                                <div className="flex items-center justify-between mb-1">
-                                    <label className="text-[10px] font-semibold text-slate-500">Calendar</label>
-                                    <button className="text-[10px] text-[#3eb6cd] border border-[#3eb6cd]/30 px-1.5 py-0.5 rounded hover:bg-[#3eb6cd]/5 flex items-center gap-0.5">
-                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                        Manage
+                        {/* COL 4: Appointments + Notes */}
+                        <div className="w-[220px] flex flex-col shrink-0 overflow-y-auto min-h-0 bg-white hidden xl:flex">
+                            <div className="p-4 border-b border-slate-200">
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="font-bold text-slate-800 text-[13px]">Appointments</span>
+                                    <select value={appointmentReminder} onChange={e => setAppointmentReminder(e.target.value)} className="text-[10px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none text-slate-500">
+                                        <option>Reminder</option>
+                                        <option>No Reminder</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Booking Type</label>
+                                        <select value={appointmentType} onChange={e => setAppointmentType(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                            <option>Appointment</option>
+                                            <option>Test Drive</option>
+                                            <option>Viewing</option>
+                                            <option>Callback</option>
+                                            <option>Other</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <label className="text-[10px] font-semibold text-slate-500">Calendar</label>
+                                            <button className="text-[10px] text-[#3eb6cd] flex items-center gap-0.5 hover:underline">
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                Manage
+                                            </button>
+                                        </div>
+                                        <select className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
+                                            <option>Primary Calendar</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Date & Time</label>
+                                        <div className="flex gap-1">
+                                            <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] focus:outline-none focus:border-[#3eb6cd] min-w-0" />
+                                            <input type="time" value={appointmentTime} onChange={e => setAppointmentTime(e.target.value)} className="w-[68px] border border-slate-200 rounded-lg px-1 py-1.5 text-[10px] focus:outline-none focus:border-[#3eb6cd]" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Purpose</label>
+                                        <input type="text" value={appointmentPurpose} onChange={e => setAppointmentPurpose(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-[#3eb6cd]" />
+                                    </div>
+                                    <button className="w-full py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] transition-colors">
+                                        Next
                                     </button>
                                 </div>
-                                <select className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] bg-white focus:outline-none focus:border-[#3eb6cd]">
-                                    <option>Primary Calendar</option>
-                                </select>
                             </div>
-                            <div>
-                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Date & Time</label>
-                                <div className="flex gap-1">
-                                    <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#3eb6cd] min-w-0" />
-                                    <input type="time" value={appointmentTime} onChange={e => setAppointmentTime(e.target.value)} className="w-[72px] border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#3eb6cd]" />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Purpose</label>
-                                <input type="text" value={appointmentPurpose} onChange={e => setAppointmentPurpose(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] focus:outline-none focus:border-[#3eb6cd]" />
-                            </div>
-                            <button className="flex items-center gap-1 text-[#3eb6cd] text-[11px] font-semibold hover:underline">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                                Appointment Options
-                            </button>
-                            <button className="w-full py-2 bg-[#4D7CFF] text-white font-bold text-[12px] rounded-lg hover:bg-blue-600 transition-colors">
-                                Add Appointment
-                            </button>
-                        </div>
-                    </div>
 
-                    {/* Notes */}
-                    <div className="p-4 flex-1 flex flex-col">
-                        <span className="font-bold text-slate-800 text-[14px] mb-3 block">Notes</span>
-                        <textarea
-                            value={noteText}
-                            onChange={e => setNoteText(e.target.value)}
-                            placeholder="Add a note…"
-                            className="flex-1 border border-slate-200 rounded-lg p-3 text-[12px] resize-none focus:outline-none focus:border-[#3eb6cd] text-slate-700 placeholder:text-slate-300 min-h-[80px]"
-                        />
-                        <button className="mt-2 w-full py-2 border border-slate-200 text-slate-600 font-semibold text-[12px] rounded-lg hover:bg-slate-50 transition-colors">
-                            Add Note
-                        </button>
-                    </div>
-                </div>
+                            {/* Notes */}
+                            <div className="p-4 flex-1 flex flex-col">
+                                <span className="font-bold text-slate-800 text-[13px] mb-3 block">Notes</span>
+                                <textarea
+                                    value={noteText} onChange={e => setNoteText(e.target.value)}
+                                    placeholder="Add a note…"
+                                    className="flex-1 border border-slate-200 rounded-lg p-3 text-[11px] resize-none focus:outline-none focus:border-[#3eb6cd] text-slate-700 placeholder:text-slate-300 min-h-[80px]"
+                                />
+                                <button className="mt-2 w-full py-2 bg-[#3eb6cd] text-white font-bold text-[12px] rounded-lg hover:bg-[#37a3b8] transition-colors">
+                                    Add Note
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
 
             {/* ── Close Deal Modal ── */}
@@ -851,23 +927,19 @@ function CRMContent() {
                             <button onClick={() => setShowCreateLead(false)} className="text-slate-400 hover:text-slate-600"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
                         </div>
                         <div className="px-6 py-5 space-y-4">
-                            {[
-                                { label: 'Lead Type', type: 'select', val: createLeadForm.leadType, key: 'leadType', opts: ['Enquiry', 'Callback', 'Walk-in', 'Chat', 'Test Drive', 'Other'] },
-                            ].map(f => (
-                                <div key={f.label}>
-                                    <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">{f.label}</label>
-                                    <select value={f.val} onChange={e => setCreateLeadForm(p => ({ ...p, [f.key]: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]">
-                                        {f.opts.map(o => <option key={o}>{o}</option>)}
-                                    </select>
-                                </div>
-                            ))}
+                            <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">Lead Type</label>
+                                <select value={createLeadForm.leadType} onChange={e => setCreateLeadForm(p => ({ ...p, leadType: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]">
+                                    {['Enquiry', 'Callback', 'Walk-in', 'Chat', 'Test Drive', 'Other'].map(o => <option key={o}>{o}</option>)}
+                                </select>
+                            </div>
                             {[
                                 { label: 'Name', key: 'name', type: 'text', ph: 'Full name' },
                                 { label: 'Email', key: 'email', type: 'email', ph: 'email@example.com' },
                                 { label: 'Phone', key: 'phone', type: 'tel', ph: 'Phone number' },
                                 { label: 'SMS', key: 'sms', type: 'tel', ph: 'SMS number' },
                             ].map(f => (
-                                <div key={f.label}>
+                                <div key={f.key}>
                                     <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">{f.label}</label>
                                     <input type={f.type} placeholder={f.ph} value={(createLeadForm as any)[f.key]} onChange={e => setCreateLeadForm(p => ({ ...p, [f.key]: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-[#3eb6cd]" />
                                 </div>
@@ -881,7 +953,9 @@ function CRMContent() {
                             <div>
                                 <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">Marketing Consent</label>
                                 <div className="flex gap-2">
-                                    {['No', 'Yes'].map(o => <button key={o} type="button" onClick={() => setCreateLeadForm(p => ({ ...p, marketingConsent: o }))} className={`flex-1 py-2 text-[12px] font-semibold rounded-lg border transition-colors ${createLeadForm.marketingConsent === o ? 'bg-[#3eb6cd] text-white border-[#3eb6cd]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{o}</button>)}
+                                    {['No', 'Yes'].map(o => (
+                                        <button key={o} type="button" onClick={() => setCreateLeadForm(p => ({ ...p, marketingConsent: o }))} className={`flex-1 py-2 text-[12px] font-semibold rounded-lg border transition-colors ${createLeadForm.marketingConsent === o ? 'bg-[#3eb6cd] text-white border-[#3eb6cd]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{o}</button>
+                                    ))}
                                 </div>
                             </div>
                         </div>
