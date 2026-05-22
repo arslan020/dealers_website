@@ -15,6 +15,11 @@ interface AutoTraderTokenResponse {
 // Token TTL is 15 minutes — we cache with a 60s safety margin
 const tokenCache: Record<string, { token: string; expiresAt: number }> = {};
 
+// ─── In-flight deduplication for getStockItem ───────────────────────────────
+// React StrictMode double-invokes effects, causing two near-simultaneous fetches
+// for the same stock item. Sharing the in-flight promise reduces this to one AT call.
+const stockItemInflight: Record<string, Promise<any>> = {};
+
 export class AutoTraderClient {
     private tenantId: string;
     private apiKey?: string;
@@ -408,7 +413,12 @@ export class AutoTraderClient {
     /** GET /stock?advertiserId=&stockId= — single stock item. */
     async getStockItem(stockId: string) {
         if (!this.dealerId) await this.init();
-        return this.get('/stock', { advertiserId: this.dealerId!, stockId });
+        const key = `${this.tenantId}:${stockId}`;
+        if (key in stockItemInflight) return stockItemInflight[key];
+        const promise = this.get('/stock', { advertiserId: this.dealerId!, stockId })
+            .finally(() => { delete stockItemInflight[key]; });
+        stockItemInflight[key] = promise;
+        return promise;
     }
 
     /**
@@ -427,6 +437,21 @@ export class AutoTraderClient {
     async updateStock(stockId: string, updatePayload: Record<string, any>) {
         if (!this.dealerId) await this.init();
         return this.patch(`/stock/${stockId}`, updatePayload, { advertiserId: this.dealerId! });
+    }
+
+    /**
+     * POST /co-driver/stock/{stockId}?description=true&advertiserId=
+     * Returns AT Co-Driver AI-generated vehicle description.
+     * Capability: Co-Driver Descriptions
+     */
+    async generateCoDriverDescription(stockId: string): Promise<string | null> {
+        if (!this.dealerId) await this.init();
+        const result = await this.post(
+            `/co-driver/stock/${stockId}`,
+            {},
+            { description: 'true', advertiserId: this.dealerId! }
+        );
+        return result?.adverts?.retailAdverts?.description || null;
     }
 
     /**

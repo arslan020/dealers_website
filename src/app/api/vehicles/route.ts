@@ -305,7 +305,9 @@ async function getVehicles(req: NextRequest) {
 
 // Map local condition values â†’ AT-valid values (AT uses 'Average', not 'Fair')
 const AT_CONDITION_MAP: Record<string, string> = {
-    'Excellent': 'Excellent', 'Good': 'Good', 'Fair': 'Average', 'Poor': 'Poor',
+    'Excellent': 'Excellent', 'Clean': 'Clean', 'Good': 'Good',
+    'Average': 'Average', 'Fair': 'Average', 'Poor': 'Poor', 'New': 'New',
+    'New tyres required': 'New Tyres Required',
 };
 // Map local origin values â†’ AT-valid values
 const AT_ORIGIN_MAP: Record<string, string> = {

@@ -2538,7 +2538,8 @@ function VehicleCheckTab({ vehicle, checkData, checkLoading, checkError, checkLo
 }
 
 /* ─── HistoryTab Component ──────────────────────────────────────────────── */
-const CONDITION_OPTIONS = ['Excellent', 'Good', 'Fair', 'Poor'];
+const CONDITION_OPTIONS = ['Excellent', 'Clean', 'Good', 'Average', 'Poor', 'New'];
+const TYRE_CONDITION_OPTIONS = ['Excellent', 'Good', 'Average', 'Poor', 'New tyres required', 'New'];
 const SERVICE_HISTORY_OPTIONS = ['Full service history', 'Full dealership history', 'Part service history', 'No service history'];
 
 function calcWarrantyExpiry(regDate: string | undefined, months: number | string): string {
@@ -2774,7 +2775,7 @@ function HistoryTab({
                     </div>
                     <div>
                         <MdLabel>Tyre Condition</MdLabel>
-                        <MdSelect value={fields.tyreCondition as string} onChange={v => set('tyreCondition', v)} options={CONDITION_OPTIONS} />
+                        <MdSelect value={fields.tyreCondition as string} onChange={v => set('tyreCondition', v)} options={TYRE_CONDITION_OPTIONS} />
                     </div>
                 </div>
             </MdCard>
@@ -3113,6 +3114,7 @@ function OptionsTab({
     editDescription2, setEditDescription2,
     editFeatures, setEditFeatures,
     saving, onSave,
+    stockId,
     vehicleMake, vehicleFeatures, vehicleVrm, vehicleInfo,
     atOptions,
     atStdFeatures,
@@ -3134,6 +3136,7 @@ function OptionsTab({
     setEditFeatures: (v: string[]) => void;
     saving: boolean;
     onSave: () => void;
+    stockId?: string;
     vehicleMake?: string;
     vehicleFeatures?: string[];
     vehicleVrm?: string;
@@ -3422,14 +3425,30 @@ function OptionsTab({
         return results;
     }, [checked, vehicleInfo, lagCapitalise, lagUseCommas, lagCompact]);
 
-    const handleAutoDescribe = (target: 'web') => {
+    const handleAutoDescribe = async (target: 'web') => {
         setIsAutoDescribing(target);
-        setTimeout(() => {
+        try {
+            if (stockId) {
+                const res = await fetch(`/api/vehicles/autotrader-stock/${stockId}/co-driver`, { method: 'POST' });
+                const data = await res.json();
+                if (data.ok && data.description) {
+                    setEditDescription(data.description);
+                    markDone(target);
+                    return;
+                }
+                // Fall through to template if Co-Driver fails
+            }
+            // Fallback: simple template from checked features
             const checkedList = Object.entries(checked).filter(([_, v]) => v).map(([k]) => `• ${k}`).join('\n');
             setEditDescription(`Beautiful ${vehicleMake || ''} with a full service history and long MOT.\n\nKey features include:\n${checkedList}`);
-            setIsAutoDescribing(null);
             markDone(target);
-        }, 1500);
+        } catch {
+            const checkedList = Object.entries(checked).filter(([_, v]) => v).map(([k]) => `• ${k}`).join('\n');
+            setEditDescription(`Beautiful ${vehicleMake || ''} with a full service history and long MOT.\n\nKey features include:\n${checkedList}`);
+            markDone(target);
+        } finally {
+            setIsAutoDescribing(null);
+        }
     };
 
     const formatCase = (type: 'upper' | 'title' | 'lower') => {
@@ -3857,13 +3876,14 @@ function OptionsTab({
                 </div>
                 <input
                     type="text"
-                    value={editAttentionGrabber || 'Satnav, Bluetooth, 17in Alloys'}
+                    value={editAttentionGrabber}
+                    placeholder="E.g. Satnav, Bluetooth, 17in Alloys"
                     maxLength={30}
                     onChange={e => setEditAttentionGrabber(e.target.value)}
                     className="w-full border border-[#E2E8F0] rounded px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-[#4D7CFF] transition-colors"
                 />
                 <div className="text-right text-[11px] text-slate-400 mt-1">
-                    {(editAttentionGrabber || 'Satnav, Bluetooth, 17in Alloys').length} of 30 characters
+                    {editAttentionGrabber.length} of 30 characters
                 </div>
             </div>
 
@@ -4265,6 +4285,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [spValuationLoading, setSpValuationLoading] = useState(false);
     const [spValuationError, setSpValuationError] = useState('');
     const [spShowTrend, setSpShowTrend] = useState(false);
+    const [spTrendPeriod, setSpTrendPeriod] = useState(6);
+    const [spTrendHoverPt, setSpTrendHoverPt] = useState<{ svgX: number; pt: { label: string; retail: number | null; trade: number | null } } | null>(null);
     const [spShowProfit, setSpShowProfit] = useState(false);
     const [spShowPrivateVal, setSpShowPrivateVal] = useState(false);
     const [spShowSupplyDemand, setSpShowSupplyDemand] = useState(false);
@@ -6559,6 +6581,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 setEditFeatures={setEditFeatures}
                                 saving={saving}
                                 onSave={handleSaveContent}
+                                stockId={vehicle?.stockId}
                                 vehicleMake={textValue(vehicle?.make)}
                                 vehicleFeatures={vehicle?.features || []}
                                 vehicleVrm={vehicle?.vrm}
@@ -7280,7 +7303,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             const retailVal = retailValObj?.amountGBP || 0;
                             const pricePosition = retailVal > 0 ? Math.min(Math.round((websitePrice / retailVal) * 100), 100) : 0;
                             const atRating = retailValObj?.priceIndicatorRating as string | undefined;
-                            const priceIndicator = atRating === 'GREAT' ? { label: 'Great Price', color: '#00C896' }
+                            const priceIndicator = (atRating === 'GREAT' || atRating === 'LOW') ? { label: 'Great Price', color: '#00C896' }
                                 : atRating === 'GOOD' ? { label: 'Good Price', color: '#00C896' }
                                 : atRating === 'FAIR' ? { label: 'Fair Price', color: '#F59E0B' }
                                 : atRating === 'HIGH' ? { label: 'High Price', color: '#EF4444' }
@@ -7292,10 +7315,11 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 setSpValuationLoading(true);
                                 setSpValuationError('');
                                 try {
-                                    const res = await fetch('/api/vehicles/valuation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ vrm: vehicle.vrm, mileage: vehicle.mileage, condition: vehicle.condition || 'Good', derivativeId: (vehicle as any).derivativeId, registeredDate: (vehicle as any).dateOfRegistration, features: vehicle.features, optionalExtras: atOptions.filter(o => o.fitted).map(o => o.name) }) });
+                                    const res = await fetch('/api/vehicles/valuation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ vrm: vehicle.vrm, mileage: vehicle.mileage, condition: vehicle.condition || 'Good', derivativeId: (vehicle as any).derivativeId, registeredDate: (vehicle as any).dateOfRegistration, features: vehicle.features, standardFeatures: atStdFeatures.map(f => f.name), optionalExtras: atOptions.filter(o => o.fitted).map(o => o.name), stockId: vehicle.stockId, price: (vehicle as any).forecourtPrice || vehicle.price }) });
                                     const d = await res.json();
                                     if (d.ok) {
                                         setSpValuation(d);
+                                        if (d.trendLine || d.trend) setSpShowTrend(true);
                                     } else {
                                         setSpValuationError(d.error?.message || 'Valuation not available for this vehicle.');
                                     }
@@ -7405,29 +7429,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                     </div>
 
-                                    {/* ── Restore hidden sections ── */}
-                                    {(spHideValuation || spHideMetrics || spHidePricing) && (
-                                        <div className="flex gap-2 flex-wrap">
-                                            {spHideValuation && (
-                                                <button onClick={() => setSpHideValuation(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-emerald-700 border border-emerald-300 bg-emerald-50 rounded px-3 py-1.5 hover:bg-emerald-100 transition-colors">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Show Valuation
-                                                </button>
-                                            )}
-                                            {spHideMetrics && (
-                                                <button onClick={() => setSpHideMetrics(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-teal-700 border border-teal-300 bg-teal-50 rounded px-3 py-1.5 hover:bg-teal-100 transition-colors">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Show Vehicle Metrics
-                                                </button>
-                                            )}
-                                            {spHidePricing && (
-                                                <button onClick={() => setSpHidePricing(false)} className="flex items-center gap-1.5 text-[12px] font-semibold text-[#4D7CFF] border border-[#DCE4FF] bg-blue-50 rounded px-3 py-1.5 hover:bg-blue-100 transition-colors">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                                    Show Pricing
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
 
                                     {/* ── Valuation ── */}
                                     {!spHideValuation && (
@@ -7438,16 +7439,10 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 <span className="text-[15px] font-bold text-emerald-800">Valuation</span>
                                             </div>
                                             <div className="flex items-center gap-2 ml-auto">
-                                                {spValuation?.valuations?.find((v: any) => v.valuationType === 'Private') && (
-                                                    <button onClick={() => setSpShowPrivateVal(p => !p)} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors">
-                                                        {spShowPrivateVal ? 'Hide Private Valuation' : 'Show Private Valuation'}
-                                                    </button>
-                                                )}
                                                 <button onClick={loadValuation} disabled={spValuationLoading} className="text-[12px] font-semibold text-emerald-700 border border-emerald-300 rounded px-3 py-1 hover:bg-emerald-50 transition-colors flex items-center gap-1.5">
                                                     {spValuationLoading ? <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" /> : null}
                                                     {spValuation ? 'Refresh Valuation' : 'Load Valuation'}
                                                 </button>
-                                                <button onClick={() => setSpHideValuation(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
                                             </div>
                                         </div>
                                         {spValuationError && !spValuation && (
@@ -7459,85 +7454,174 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         {spValuation ? (
                                             <>
                                                 <div className="text-[12px] text-emerald-600 px-6 pb-3">Based on date first registered, mileage, condition and optional extras.</div>
-                                                <div className="grid grid-cols-3 gap-4 px-6 pb-4">
+                                                <div className="grid grid-cols-4 gap-3 px-6 pb-4">
                                                     {[
                                                         { label: 'Trade Valuation', key: 'Trade' },
                                                         { label: 'Part Ex Valuation', key: 'PartExchange' },
                                                         { label: 'Retail Valuation', key: 'Retail' },
+                                                        { label: 'Private Valuation', key: 'Private' },
                                                     ].map(item => {
                                                         const val = spValuation.valuations?.find((v: any) => v.valuationType === item.key);
                                                         return (
-                                                            <div key={item.key} className="rounded-xl p-5 text-center" style={{background: '#00B67A'}}>
-                                                                <div className="text-[11px] text-white/80 mb-1">AutoTrader</div>
-                                                                <div className="text-[11px] font-bold text-white mb-3">{item.label}</div>
-                                                                <div className="text-[22px] font-bold text-white">{val?.amountGBP ? `£${val.amountGBP.toLocaleString()}` : '—'}</div>
+                                                            <div key={item.key} className="rounded-xl p-4 text-center" style={{background: '#00B67A'}}>
+                                                                <div className="text-[10px] text-white/80 mb-1">AutoTrader</div>
+                                                                <div className="text-[10px] font-bold text-white mb-2">{item.label}</div>
+                                                                <div className="text-[20px] font-bold text-white">{val?.amountGBP ? `£${val.amountGBP.toLocaleString()}` : '—'}</div>
                                                             </div>
                                                         );
                                                     })}
                                                 </div>
                                                 <div className="px-6 pb-4 space-y-3">
-                                                    {/* Show Private Valuation panel */}
-                                                    {spShowPrivateVal && (() => {
-                                                        const privateVal = spValuation.valuations?.find((v: any) => v.valuationType === 'Private');
+
+                                                    {/* Show Valuation Trend chart */}
+                                                    {(spValuation?.trendLine || spValuation?.trend) && (() => {
+                                                        const trendLine = spValuation?.trendLine; // rich monthly from /valuations/trends
+                                                        const trend = spValuation?.trend;          // sparse +30/60/90 from stock endpoint
+                                                        const getAmt = (obj: any) => obj?.amountGBP ?? obj?.amountExcludingVatGBP ?? null;
+                                                        const fmtDate = (d: string | Date) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+                                                        const currentRetail = spValuation.valuations?.find((v: any) => v.valuationType === 'Retail')?.amountGBP ?? null;
+                                                        const now = new Date();
+                                                        const addDays = (n: number) => new Date(now.getTime() + n * 86400000);
+                                                        interface ChartPt { label: string; ts: number; retail: number | null; trade?: number | null; partEx?: number | null; }
+                                                        let pts: ChartPt[] = [];
+                                                        if (trendLine && Array.isArray(trendLine) && trendLine.length >= 2) {
+                                                            pts = trendLine.map((p: any) => ({
+                                                                label: fmtDate(p.date), ts: new Date(p.date).getTime(),
+                                                                retail: getAmt(p.retail), trade: getAmt(p.trade), partEx: getAmt(p.partExchange),
+                                                            })).filter((p: ChartPt) => p.retail != null);
+                                                        } else if (trend) {
+                                                            const getTV = (p: any) => p?.adjusted?.retail?.amountGBP ?? p?.marketAverage?.retail?.amountGBP ?? null;
+                                                            pts = [
+                                                                { label: fmtDate(now), ts: now.getTime(), retail: currentRetail },
+                                                                { label: fmtDate(addDays(30)), ts: addDays(30).getTime(), retail: getTV(trend?.plus30Days) },
+                                                                { label: fmtDate(addDays(60)), ts: addDays(60).getTime(), retail: getTV(trend?.plus60Days) },
+                                                                { label: fmtDate(addDays(90)), ts: addDays(90).getTime(), retail: getTV(trend?.plus90Days) },
+                                                            ].filter(p => p.retail != null);
+                                                        }
                                                         return (
-                                                            <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
-                                                                <div className="text-[12px] font-semibold text-emerald-700 mb-1">Private Valuation</div>
-                                                                <div className="text-[24px] font-bold text-emerald-800">£{privateVal?.amountGBP?.toLocaleString()}</div>
-                                                            </div>
+                                                            <>
+                                                                <button onClick={() => setSpShowTrend(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
+                                                                    <svg className={`w-3 h-3 transition-transform ${spShowTrend ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+                                                                    {spShowTrend ? 'Hide Valuation Trend' : 'Show Valuation Trend'}
+                                                                </button>
+                                                                {spShowTrend && (() => {
+                                                                    interface ChartPt2 { label: string; ts: number; retail: number | null; trade: number | null; }
+                                                                    const getAmt2 = (obj: any) => obj?.amountGBP ?? obj?.amountExcludingVatGBP ?? null;
+                                                                    const fmtLong = (d: string | Date) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                                                                    const nowTs2 = now.getTime();
+                                                                    // Build all data points
+                                                                    let allPts: ChartPt2[] = [];
+                                                                    if (trendLine && Array.isArray(trendLine) && trendLine.length >= 2) {
+                                                                        allPts = trendLine.map((p: any) => ({
+                                                                            label: fmtLong(p.date), ts: new Date(p.date).getTime(),
+                                                                            retail: getAmt2(p.retail),
+                                                                            trade: getAmt2(p.trade) ?? getAmt2(p.partExchange),
+                                                                        })).filter((p: ChartPt2) => p.retail != null);
+                                                                    } else if (trend) {
+                                                                        const gTV = (p: any) => p?.adjusted?.retail?.amountGBP ?? p?.marketAverage?.retail?.amountGBP ?? null;
+                                                                        allPts = [
+                                                                            { label: fmtLong(now), ts: nowTs2, retail: currentRetail, trade: null },
+                                                                            { label: fmtLong(addDays(30)), ts: addDays(30).getTime(), retail: gTV(trend?.plus30Days), trade: null },
+                                                                            { label: fmtLong(addDays(60)), ts: addDays(60).getTime(), retail: gTV(trend?.plus60Days), trade: null },
+                                                                            { label: fmtLong(addDays(90)), ts: addDays(90).getTime(), retail: gTV(trend?.plus90Days), trade: null },
+                                                                        ].filter(p => p.retail != null);
+                                                                    }
+                                                                    // Filter by period (half-window either side of today)
+                                                                    const halfDays = spTrendPeriod === 1 ? 15 : spTrendPeriod === 3 ? 45 : 91;
+                                                                    const halfMs = halfDays * 86400000;
+                                                                    const filtered = allPts.filter(p => p.ts >= nowTs2 - halfMs && p.ts <= nowTs2 + halfMs);
+                                                                    const dPts = filtered.length >= 2 ? filtered : allPts;
+                                                                    if (dPts.length < 2) return <div className="mt-2 text-[12px] text-emerald-600 bg-emerald-50 rounded-lg p-3">Trend data not available.</div>;
+                                                                    // Chart geometry
+                                                                    const W=800, H=220, pL=65, pR=15, pT=25, pB=50, cW=W-pL-pR, cH=H-pT-pB;
+                                                                    const rPts = dPts.filter(p => p.retail != null);
+                                                                    const tPts = dPts.filter(p => p.trade != null);
+                                                                    const allV = dPts.flatMap(p => [p.retail, p.trade].filter((v): v is number => v != null));
+                                                                    const rawMin = Math.min(...allV), rawMax = Math.max(...allV);
+                                                                    const yStep = rawMax - rawMin <= 5000 ? 1000 : rawMax - rawMin <= 20000 ? 2000 : rawMax - rawMin <= 50000 ? 5000 : 10000;
+                                                                    const minV = Math.floor(rawMin / yStep) * yStep;
+                                                                    const maxV = Math.ceil(rawMax / yStep) * yStep;
+                                                                    const rng = maxV - minV || yStep;
+                                                                    const minTs2 = dPts[0].ts, maxTs2 = dPts[dPts.length-1].ts, tsRng2 = maxTs2 - minTs2 || 1;
+                                                                    const cx2 = (ts: number) => pL + ((ts - minTs2) / tsRng2) * cW;
+                                                                    const cy2 = (v: number) => pT + cH - ((v - minV) / rng) * cH;
+                                                                    const mkP = (arr: ChartPt2[], key: 'retail'|'trade') => arr.filter(p=>p[key]!=null).map((p,i)=>`${i===0?'M':'L'} ${cx2(p.ts).toFixed(1)} ${cy2(p[key]!).toFixed(1)}`).join(' ');
+                                                                    const rPath = mkP(rPts, 'retail');
+                                                                    const tPath = tPts.length > 1 ? mkP(tPts, 'trade') : '';
+                                                                    // Shaded area between retail (top) and trade (bottom)
+                                                                    const areaPath2 = tPts.length > 1
+                                                                        ? `${rPath} ${[...tPts].reverse().map((p,i)=>`${i===0?'L':'L'} ${cx2(p.ts).toFixed(1)} ${cy2(p.trade!).toFixed(1)}`).join(' ')} Z`
+                                                                        : `${rPath} L ${cx2(maxTs2).toFixed(1)} ${(pT+cH).toFixed(1)} L ${cx2(minTs2).toFixed(1)} ${(pT+cH).toFixed(1)} Z`;
+                                                                    // Y labels
+                                                                    const yLabels2: number[] = [];
+                                                                    for (let v = minV; v <= maxV + 1; v += yStep) yLabels2.push(v);
+                                                                    // X labels — every nth point
+                                                                    const xStep = Math.max(1, Math.ceil(dPts.length / 8));
+                                                                    const todayX2 = cx2(Math.min(Math.max(nowTs2, minTs2), maxTs2));
+                                                                    return (
+                                                                        <div className="mt-2 rounded-xl border border-slate-200 bg-white overflow-hidden">
+                                                                            <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{display:'block', cursor:'crosshair'}}
+                                                                                onMouseMove={(e) => {
+                                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                                    const mx = (e.clientX - rect.left) * (W / rect.width);
+                                                                                    let closest = dPts[0], minDist = Infinity;
+                                                                                    for (const p of dPts) { const d = Math.abs(cx2(p.ts) - mx); if (d < minDist) { minDist = d; closest = p; } }
+                                                                                    setSpTrendHoverPt({ svgX: cx2(closest.ts), pt: closest });
+                                                                                }}
+                                                                                onMouseLeave={() => setSpTrendHoverPt(null)}
+                                                                            >
+                                                                                {yLabels2.map((v,i) => (
+                                                                                    <g key={i}>
+                                                                                        <line x1={pL} y1={cy2(v)} x2={W-pR} y2={cy2(v)} stroke="#E5E7EB" strokeWidth="1"/>
+                                                                                        <text x={pL-6} y={cy2(v)+4} textAnchor="end" fontSize="10" fill="#6B7280">{`\u00a3${v.toLocaleString()}`}</text>
+                                                                                    </g>
+                                                                                ))}
+                                                                                <path d={areaPath2} fill="#00B67A" fillOpacity="0.12"/>
+                                                                                {tPath && <path d={tPath} fill="none" stroke="#3B82F6" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>}
+                                                                                <path d={rPath} fill="none" stroke="#00B67A" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+                                                                                {rPts.map((p,i) => <circle key={i} cx={cx2(p.ts)} cy={cy2(p.retail!)} r="3" fill="#00B67A" stroke="white" strokeWidth="1.5"/>)}
+                                                                                {tPts.map((p,i) => <circle key={i} cx={cx2(p.ts)} cy={cy2(p.trade!)} r="3" fill="#3B82F6" stroke="white" strokeWidth="1.5"/>)}
+                                                                                <line x1={todayX2} y1={pT} x2={todayX2} y2={pT+cH} stroke="#9CA3AF" strokeWidth="1" strokeDasharray="3 2"/>
+                                                                                {dPts.map((p,i) => i % xStep === 0 ? <text key={i} x={cx2(p.ts)} y={H-8} textAnchor="middle" fontSize="9" fill="#9CA3AF">{p.label}</text> : null)}
+                                                                                {/* Hover tooltip */}
+                                                                                {spTrendHoverPt && (() => {
+                                                                                    const hx = spTrendHoverPt.svgX;
+                                                                                    const hp = spTrendHoverPt.pt;
+                                                                                    const lines: {color: string; label: string; val: number}[] = [];
+                                                                                    if (hp.retail != null) lines.push({ color: '#00B67A', label: 'Retail', val: hp.retail });
+                                                                                    if (hp.trade != null)  lines.push({ color: '#3B82F6', label: 'Trade', val: hp.trade });
+                                                                                    const TW = 175, TH = 18 + lines.length * 18 + 8;
+                                                                                    const TX = hx + 12 + TW > W - pR ? hx - TW - 12 : hx + 12;
+                                                                                    const TY = pT + 4;
+                                                                                    return (
+                                                                                        <g pointerEvents="none">
+                                                                                            <line x1={hx} y1={pT} x2={hx} y2={pT+cH} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="3 2"/>
+                                                                                            <rect x={TX} y={TY} width={TW} height={TH} fill="white" stroke="#E2E8F0" strokeWidth="1" rx="6"/>
+                                                                                            <text x={TX+10} y={TY+13} fontSize="11" fontWeight="bold" fill="#0F172A">{hp.label}</text>
+                                                                                            {lines.map((l, i) => (
+                                                                                                <g key={l.label}>
+                                                                                                    <circle cx={TX+16} cy={TY+24+i*18} r="4" fill={l.color}/>
+                                                                                                    <text x={TX+26} y={TY+28+i*18} fontSize="10" fill="#374151">{`${l.label}:  \u00a3${l.val.toLocaleString()}`}</text>
+                                                                                                </g>
+                                                                                            ))}
+                                                                                        </g>
+                                                                                    );
+                                                                                })()}
+                                                                            </svg>
+                                                                            <div className="flex items-center justify-end gap-3 px-4 pb-3 text-[11px] text-slate-500">
+                                                                                {([{l:'1 Month',v:1},{l:'3 Months',v:3},{l:'6 Months',v:6},{l:'12 Months',v:12}] as {l:string,v:number}[]).map(opt => (
+                                                                                    <button key={opt.v} onClick={() => setSpTrendPeriod(opt.v)} className={`flex items-center gap-1.5 cursor-pointer select-none ${spTrendPeriod===opt.v ? 'text-emerald-700 font-semibold' : 'text-slate-400 hover:text-slate-600'}`}>
+                                                                                        <span className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${spTrendPeriod===opt.v ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300 bg-white'}`}/>
+                                                                                        {opt.l}
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })()}
+                                                            </>
                                                         );
                                                     })()}
-
-                                                    {/* Show Valuation Trend button + panel */}
-                                                    {spValuation?.trend && (
-                                                        <>
-                                                            <button onClick={() => setSpShowTrend(p => !p)} className="flex items-center gap-2 text-[13px] font-semibold text-emerald-700">
-                                                                <svg className={`w-3 h-3 transition-transform ${spShowTrend ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 4.707a1 1 0 011.414 0l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414-1.414L11.586 10 7.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
-                                                                {spShowTrend ? 'Hide Valuation Trend' : 'Show Valuation Trend'}
-                                                            </button>
-                                                            {spShowTrend && (() => {
-                                                                const trend = spValuation.trend;
-                                                                const periods = [
-                                                                    { label: '+30 Days', key: 'plus30Days' },
-                                                                    { label: '+60 Days', key: 'plus60Days' },
-                                                                    { label: '+90 Days', key: 'plus90Days' },
-                                                                ];
-                                                                const rows = [
-                                                                    { label: 'Trade', key: 'trade' },
-                                                                    { label: 'Part Exchange', key: 'partExchange' },
-                                                                    { label: 'Retail', key: 'retail' },
-                                                                ];
-                                                                return (
-                                                                    <div className="mt-2 overflow-x-auto rounded-lg border border-emerald-100">
-                                                                        <table className="w-full text-[12px]">
-                                                                            <thead>
-                                                                                <tr className="bg-emerald-50">
-                                                                                    <th className="px-4 py-2 text-left font-semibold text-emerald-700"></th>
-                                                                                    {periods.map(p => (
-                                                                                        <th key={p.key} className="px-4 py-2 text-center font-semibold text-emerald-700">{p.label}</th>
-                                                                                    ))}
-                                                                                </tr>
-                                                                            </thead>
-                                                                            <tbody>
-                                                                                {rows.map((row, i) => (
-                                                                                    <tr key={row.key} className={i % 2 === 0 ? 'bg-white' : 'bg-emerald-50/40'}>
-                                                                                        <td className="px-4 py-2.5 font-semibold text-slate-600">{row.label}</td>
-                                                                                        {periods.map(p => {
-                                                                                            const amt = trend[p.key]?.[row.key]?.amountGBP;
-                                                                                            return (
-                                                                                                <td key={p.key} className="px-4 py-2.5 text-center font-semibold text-slate-800">
-                                                                                                    {amt != null ? `£${amt.toLocaleString()}` : '—'}
-                                                                                                </td>
-                                                                                            );
-                                                                                        })}
-                                                                                    </tr>
-                                                                                ))}
-                                                                            </tbody>
-                                                                        </table>
-                                                                    </div>
-                                                                );
-                                                            })()}
-                                                        </>
-                                                    )}
                                                 </div>
                                             </>
                                         ) : (
@@ -7558,21 +7642,14 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                     <button onClick={() => setSpShowSupplyDemand(p => !p)} className="text-[12px] font-semibold text-teal-700 border border-teal-300 rounded px-3 py-1 hover:bg-teal-50 transition-colors">
                                                         {spShowSupplyDemand ? 'Hide Supply & Demand' : 'Show Supply & Demand'}
                                                     </button>
-                                                    <button onClick={() => setSpHideMetrics(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
                                                 </div>
                                             </div>
                                             <div className="text-[12px] text-teal-600 px-6 pb-3">Market insights powered by AutoTrader.</div>
-                                            <div className="grid grid-cols-3 gap-4 px-6 pb-5">
-                                                {[
-                                                    { label: 'Live Market', value: spValuation.metrics.vehicleMetrics?.liveRetailPercentage != null ? `${spValuation.metrics.vehicleMetrics.liveRetailPercentage}%` : '—' },
-                                                    { label: 'Retail Rating', value: spValuation.metrics.rating != null ? `${spValuation.metrics.rating} / 100` : '—' },
-                                                    { label: 'Days to Sell', value: spValuation.metrics.daysToSell != null ? String(spValuation.metrics.daysToSell) : '—' },
-                                                ].map(item => (
-                                                    <div key={item.label} className="rounded-xl p-5 text-center text-white" style={{background: '#0E9F9F'}}>
-                                                        <div className="text-[12px] text-white/80 mb-2">{item.label}</div>
-                                                        <div className="text-[24px] font-bold">{item.value}</div>
-                                                    </div>
-                                                ))}
+                                            <div className="px-6 pb-5">
+                                                <div className="rounded-xl p-5 text-center text-white" style={{background: '#0E9F9F'}}>
+                                                    <div className="text-[12px] text-white/80 mb-2">Retail Rating</div>
+                                                    <div className="text-[24px] font-bold">{spValuation.metrics.rating != null ? `${spValuation.metrics.rating} / 100` : '—'}</div>
+                                                </div>
                                             </div>
                                             {spShowSupplyDemand && (() => {
                                                 const vm = spValuation.metrics?.vehicleMetrics;
@@ -7614,7 +7691,6 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 </div>
                                                 <div className="text-[12px] text-slate-400 mt-0.5">Based on retail valuation and AutoTrader market position.</div>
                                             </div>
-                                            <button onClick={() => setSpHidePricing(true)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg leading-none">&times;</button>
                                         </div>
                                         <div className="p-6 space-y-5">
                                             {retailVal > 0 && (

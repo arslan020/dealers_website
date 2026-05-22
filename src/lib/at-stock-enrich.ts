@@ -96,10 +96,18 @@ export async function mergeLiveAdvertsOntoVehicleDoc(tenantId: string, stockId: 
             condition: fill(doc.condition, liveV.ownershipCondition === 'New' ? 'New' : (liveV.ownershipCondition ? 'Used' : '')),
             // Always use AT as source of truth for adverts, media and full technicalSpecs
             adverts:      live.adverts ?? doc.adverts,
-            // AT is source of truth for features — always use AT when available.
-            features: Array.isArray(live.features) && live.features.length > 0
-                ? live.features.map((f: any) => typeof f === 'string' ? f : (f.name || '')).filter(Boolean)
-                : (Array.isArray(doc.features) ? doc.features : []),
+            // Merge AT features with dealer-saved features so user selections (e.g. optional extras
+            // checked in the Options tab) survive a page refresh. AT features win for duplicates
+            // since they're normalised; unique saved names are appended after.
+            features: (() => {
+                const atFeat: string[] = Array.isArray(live.features) && live.features.length > 0
+                    ? live.features.map((f: any) => typeof f === 'string' ? f : (f.name || '')).filter(Boolean)
+                    : [];
+                const savedFeat: string[] = Array.isArray(doc.features) ? doc.features : [];
+                const atSet = new Set(atFeat.map(f => f.toLowerCase()));
+                const extras = savedFeat.filter(f => !atSet.has(f.toLowerCase()));
+                return atFeat.length > 0 ? [...atFeat, ...extras] : savedFeat;
+            })(),
             technicalSpecs: { ...(doc.technicalSpecs || {}), ...liveV, ...(doc.manualSpecs || {}) },
             // AT media is source of truth — exposes full href with correct CDN host for the Images tab
             media:    live.media ?? doc.media,

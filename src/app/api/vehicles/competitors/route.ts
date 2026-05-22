@@ -328,18 +328,20 @@ async function getCompetitors(req: NextRequest) {
             } catch { /* ignore */ }
         }
 
-        // If still empty (or still too few), fall back to broad Search API by make/model.
+        // If still empty (or still too few), fall back to /stock?searchType=competitor by make/model.
+        // AT docs: competitor search must use /stock?searchType=competitor, not /search.
         if (aggregated.length < 5) {
-            const broadSearchUrl = new URL(`${AUTOTRADER_BASE_URL}/search`);
+            const broadSearchUrl = new URL(`${AUTOTRADER_BASE_URL}/stock`);
+            broadSearchUrl.searchParams.set('searchType', 'competitor');
             broadSearchUrl.searchParams.set('advertiserId', client.dealerId || '');
             broadSearchUrl.searchParams.set('pageSize', String(perPage));
             broadSearchUrl.searchParams.set('page', '1');
             broadSearchUrl.searchParams.set('sort', 'totalPriceAsc');
-            // Ensure valuation data is requested where supported
             broadSearchUrl.searchParams.set('valuations', 'true');
             broadSearchUrl.searchParams.set('vehicleMetrics', 'true');
             if (vehicleForFallback.make) broadSearchUrl.searchParams.set('standardMake', vehicleForFallback.make);
             if (vehicleForFallback.model) broadSearchUrl.searchParams.set('standardModel', vehicleForFallback.model);
+            if (dealerPostcode) broadSearchUrl.searchParams.set('postcode', dealerPostcode);
 
             const byYear = Number(vehicleForFallback.yearOfManufacture || vehicleForFallback.year || 0);
             if (Number.isFinite(byYear) && byYear > 1900) {

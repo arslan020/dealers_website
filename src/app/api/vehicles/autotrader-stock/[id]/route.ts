@@ -52,6 +52,7 @@ export async function GET(
                 const lv = live.vehicle || {};
                 vehicle = {
                     id: live.id || live.stockId || id,
+                    stockId: live.id || live.stockId || id,
                     vrm: toStr(lv.registration || lv.vrm || lv.registrationNumber),
                     make: toStr(lv.make),
                     model: toStr(lv.model),
