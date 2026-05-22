@@ -773,7 +773,7 @@ function CRMContent() {
                                     <div>
                                         <div className="flex items-center justify-between mb-1">
                                             <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                                                {selectedLead.stock.vrm || selectedLead.stock.stockId?.slice(0, 8) || '—'}
+                                                {selectedLead.stock.vrm || 'No VRM'}
                                             </span>
                                             <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">For Sale</span>
                                         </div>

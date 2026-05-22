@@ -21,7 +21,15 @@ async function getVehicleById(
 
     await connectToDatabase();
 
-    const vehicle = await Vehicle.findOne({ _id: id, tenantId }).lean();
+    // Try _id first (valid 24-char ObjectId), then fall back to stockId (AT stock ID)
+    const mongoose = await import('mongoose');
+    let vehicle = null;
+    if (mongoose.default.Types.ObjectId.isValid(id)) {
+        vehicle = await Vehicle.findOne({ _id: id, tenantId }).lean();
+    }
+    if (!vehicle) {
+        vehicle = await Vehicle.findOne({ stockId: id, tenantId }).lean();
+    }
 
     if (!vehicle) {
         return NextResponse.json({ ok: false, error: 'Vehicle not found' }, { status: 404 });
