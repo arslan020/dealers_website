@@ -5,6 +5,8 @@ import { AutoTraderClient } from '@/lib/autotrader';
 import connectToDatabase from '@/lib/db';
 import Lead from '@/models/Lead';
 import Customer from '@/models/Customer';
+import Vehicle from '@/models/Vehicle';
+import mongoose from 'mongoose';
 
 /** Turn AutoTrader JSON error body into a short user-facing string */
 function formatAutoTraderError(data: unknown): string {
@@ -72,6 +74,17 @@ async function getDeals(req: NextRequest) {
     const data = await client.getDeals(queryParams);
     await connectToDatabase();
 
+    // Build stockId → { vrm, _id } lookup from local Vehicle DB
+    const stockIds = (data.results || [])
+        .map((d: any) => d.stock?.stockId)
+        .filter(Boolean);
+    const vehicleRecords = stockIds.length
+        ? await Vehicle.find({ stockId: { $in: stockIds }, tenantId: new mongoose.Types.ObjectId(session.tenantId) }, { stockId: 1, vrm: 1 }).lean()
+        : [];
+    const vehicleByStockId = new Map<string, { vrm: string; id: string }>(
+        (vehicleRecords as any[]).map((v: any) => [v.stockId, { vrm: v.vrm, id: String(v._id) }])
+    );
+
     // Shape the results for the UI and Sync to DB
     const deals = await Promise.all((data.results || []).map(async (d: any) => {
         
@@ -136,6 +149,9 @@ async function getDeals(req: NextRequest) {
             );
         }
 
+        const stockId = d.stock?.stockId;
+        const vehicleInfo = vehicleByStockId.get(stockId);
+
         return {
             dealId: d.dealId ?? d.id,
             advertiserId: d.advertiserId,
@@ -144,7 +160,9 @@ async function getDeals(req: NextRequest) {
             advertiserDealStatus: d.advertiserDealStatus,
             consumerDealStatus: d.consumerDealStatus,
             consumer: d.consumer,
-            stock: d.stock,
+            customerId: customerId ? String(customerId) : null,
+            stock: { ...d.stock, vrm: vehicleInfo?.vrm || null },
+            vehicleId: vehicleInfo?.id || null,
             price: d.price,
             reservation: d.reservation,
             buyingSignals: d.buyingSignals,

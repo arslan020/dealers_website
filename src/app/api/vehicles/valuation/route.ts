@@ -50,10 +50,9 @@ async function getVehicleValuation(req: NextRequest) {
         let trendLine: any = null;
 
         if (stockId) {
-            // AT docs: stock endpoint gives feature-adjusted valuation + sparse trend (plus30/60/90).
-            // BUT: stock endpoint does NOT return private valuation, and trendedValuations is future-only.
-            // Fetch stock first, then use derivativeId from stock item as fallback if not in request body.
-            // Then parallel: POST /valuations (private) + POST /valuations/trends (rich historical chart).
+            // AT recommendation: stock endpoint is most accurate for stocked vehicles.
+            // Single combined call gets valuations + trendedValuations + vehicleMetrics.
+            // Only add /valuations/trends separately for the weekly chart (stock gives sparse +30/60/90 only).
 
             const featureNames = new Set<string>();
             if (Array.isArray(standardFeatures)) standardFeatures.forEach((f: any) => { const n = typeof f === 'string' ? f : f.name; if (n) featureNames.add(n); });
@@ -61,7 +60,6 @@ async function getVehicleValuation(req: NextRequest) {
             if (Array.isArray(features))          features.forEach((f: any)          => { const n = typeof f === 'string' ? f : f.name; if (n) featureNames.add(n); });
             const featuresArr = featureNames.size > 0 ? [...featureNames].map(name => ({ name })) : undefined;
 
-            // Fetch stock first so we can extract derivativeId/firstRegistrationDate if not in request body
             const stockRes = await client.get('/stock', {
                 advertiserId: client.dealerId!,
                 stockId: String(stockId),
@@ -72,20 +70,12 @@ async function getVehicleValuation(req: NextRequest) {
             const item = stockRes?.results?.[0] ?? stockRes;
             const atVehicle = item?.vehicle ?? {};
 
-            // Use request body values, fall back to what AT stock item has
-            const resolvedDerivId   = derivativeId        || atVehicle.derivativeId        || null;
-            const resolvedRegDate   = firstRegistrationDate || atVehicle.firstRegistrationDate || null;
+            const resolvedDerivId = derivativeId         || atVehicle.derivativeId         || null;
+            const resolvedRegDate = firstRegistrationDate || atVehicle.firstRegistrationDate || null;
 
-            let valResP: Promise<any>    = Promise.resolve(null);
+            // /valuations/trends for weekly chart — stock trendedValuations only gives +30/60/90 days
             let trendsResP: Promise<any> = Promise.resolve(null);
-
             if (resolvedDerivId && resolvedRegDate) {
-                const valPayload: any = { vehicle: { derivativeId: resolvedDerivId, firstRegistrationDate: resolvedRegDate, odometerReadingMiles } };
-                if (conditionRating) valPayload.conditionRating = conditionRating;  // title case: "Good" — correct for /valuations
-                if (featuresArr)     valPayload.features = featuresArr;
-                if (price != null)   valPayload.adverts = { retailAdverts: { price: { amountGBP: Number(price) } } };
-                valResP = client.post('/valuations', valPayload, { advertiserId: client.dealerId! }).catch(() => null);
-
                 const nowD = new Date();
                 const startDate = new Date(nowD.getTime() - 91 * 86400000).toISOString().slice(0, 10);
                 const endDate   = new Date(nowD.getTime() + 91 * 86400000).toISOString().slice(0, 10);
@@ -98,13 +88,12 @@ async function getVehicleValuation(req: NextRequest) {
                         end:   { date: endDate,   odometerReadingMiles },
                     },
                 };
-                // AT docs: /valuations/trends conditionRating must be UPPERCASE ("GOOD", not "Good")
                 if (conditionRating) trendsPayload.conditionRating = conditionRating.toUpperCase();
                 if (featuresArr)     trendsPayload.features = featuresArr;
                 trendsResP = client.post('/valuations/trends', trendsPayload, { advertiserId: client.dealerId! }).catch(() => null);
             }
 
-            const [valRes, trendsRes] = await Promise.all([valResP, trendsResP]);
+            const trendsRes = await trendsResP;
 
             // Stock returns adjusted (feature-aware) and marketAverage — prefer adjusted
             const v = item?.valuations;
@@ -114,13 +103,11 @@ async function getVehicleValuation(req: NextRequest) {
                     retail:      { amountGBP: src.retail?.amountGBP ?? null, priceIndicatorRating: item?.adverts?.retailAdverts?.priceIndicatorRating ?? null },
                     trade:       { amountGBP: src.trade?.amountGBP ?? null },
                     partExchange:{ amountGBP: src.partExchange?.amountGBP ?? null },
-                    // Stock endpoint doesn't return private — use POST /valuations result
-                    private:     { amountGBP: src.private?.amountGBP ?? valRes?.valuations?.private?.amountGBP ?? null },
+                    private:     { amountGBP: src.private?.amountGBP ?? null },
                 };
             }
             metricsRaw = { vehicleMetrics: item?.vehicleMetrics ?? null };
             trend = item?.trendedValuations ?? null;
-            // Rich trend (historical + future) takes priority over sparse stock trend
             trendLine = trendsRes?.valuations ?? null;
 
         } else if (derivativeId && firstRegistrationDate) {
@@ -185,17 +172,36 @@ async function getVehicleValuation(req: NextRequest) {
             trendLine = trendsRes?.valuations ?? null;
 
         } else {
-            // Fallback: VRM only — no feature adjustment
+            // Fallback: VRM only — lookup derivativeId first (cached 1hr), then POST /valuations
+            // AT recommends /valuations over /vehicles for valuation accuracy
             const registration = (vrm as string).toUpperCase().replace(/\s/g, '');
-            const response = await client.get('/vehicles', {
-                registration,
-                advertiserId: client.dealerId!,
-                valuations: 'true',
-                vehicleMetrics: 'true',
-                odometerReadingMiles: String(odometerReadingMiles),
-            });
-            valuationsObj = response?.valuations;
-            metricsRaw = response ?? {};
+            const lookupData = await client.lookupVehicle(registration);
+            const lookupVehicleData = lookupData?.vehicle ?? {};
+            const fallbackDerivId = lookupVehicleData.derivativeId;
+            const fallbackRegDate = lookupVehicleData.firstRegistrationDate;
+
+            if (fallbackDerivId && fallbackRegDate) {
+                const payload: any = {
+                    vehicle: { derivativeId: fallbackDerivId, firstRegistrationDate: fallbackRegDate, odometerReadingMiles },
+                };
+                if (conditionRating) payload.conditionRating = conditionRating;
+                const rawFeatures: any[] = lookupData?.features || [];
+                const fittedFeatures = rawFeatures
+                    .filter((f: any) => f.type === 'Standard' || f.factoryFitted === true)
+                    .map((f: any) => ({ name: f.name }));
+                if (fittedFeatures.length > 0) payload.features = fittedFeatures;
+                const metricsPayload: any = { vehicle: { derivativeId: fallbackDerivId, firstRegistrationDate: fallbackRegDate, odometerReadingMiles } };
+                if (payload.features) metricsPayload.features = payload.features;
+                const [valuationRes, metricsRes] = await Promise.all([
+                    client.post('/valuations', payload, { advertiserId: client.dealerId! }),
+                    client.post('/vehicle-metrics', metricsPayload, { advertiserId: client.dealerId! }),
+                ]);
+                valuationsObj = valuationRes?.valuations;
+                metricsRaw = metricsRes ?? {};
+            } else {
+                valuationsObj = null;
+                metricsRaw = {};
+            }
         }
 
         if (!valuationsObj) {

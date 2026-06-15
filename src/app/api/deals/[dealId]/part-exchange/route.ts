@@ -65,3 +65,43 @@ export async function POST(req: NextRequest, { params }: Params) {
         return NextResponse.json({ ok: false, error: msg }, { status: error.status || 500 });
     }
 }
+
+/**
+ * PATCH /api/deals/[dealId]/part-exchange
+ * Update an existing part exchange (condition, offer, outstanding finance).
+ * Body: { partExchangeId, advertiser?: { conditionRating?, offer? }, vehicle?: { outstandingFinance? } }
+ */
+export async function PATCH(req: NextRequest, { params }: Params) {
+    try {
+        const token = req.cookies.get('access_token')?.value;
+        const session = token ? await verifyAccessToken(token) : null;
+        if (!session?.tenantId) {
+            return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const { dealId } = await params;
+        const body = await req.json();
+        const { partExchangeId, advertiser, vehicle } = body;
+
+        if (!partExchangeId) {
+            return NextResponse.json({ ok: false, error: 'partExchangeId is required.' }, { status: 400 });
+        }
+
+        const client = new AutoTraderClient(session.tenantId);
+        await client.init();
+
+        const payload: any = { dealId };
+        if (advertiser) payload.advertiser = advertiser;
+        if (vehicle?.outstandingFinance) payload.vehicle = { outstandingFinance: vehicle.outstandingFinance };
+
+        const result = await client.updatePartExchange(partExchangeId, payload);
+        return NextResponse.json({ ok: true, result });
+
+    } catch (error: any) {
+        console.error('[PX PATCH]', error.message, error.data);
+        const msg = error.data
+            ? (typeof error.data === 'object' ? JSON.stringify(error.data) : String(error.data))
+            : error.message || 'Failed to update part exchange.';
+        return NextResponse.json({ ok: false, error: msg }, { status: error.status || 500 });
+    }
+}

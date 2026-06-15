@@ -85,6 +85,11 @@ function CRMContent() {
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
     const [chatLoading, setChatLoading] = useState(false);
     const [newMessage, setNewMessage] = useState('');
+
+    const [showMediaModal, setShowMediaModal] = useState(false);
+    const [vehicleImages, setVehicleImages] = useState<string[]>([]);
+    const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set());
+    const [loadingMedia, setLoadingMedia] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     const [showQuickInsert, setShowQuickInsert] = useState(false);
@@ -261,6 +266,53 @@ function CRMContent() {
             }
         } catch { toast.error('Connection error'); }
         finally { setIsClosingDeal(false); }
+    };
+
+    const handleSendLink = async () => {
+        if (!selectedLead?.stock?.stockId) return;
+        try {
+            const res = await fetch(`/api/vehicles/${selectedLead.stock.stockId}`);
+            const data = await res.json();
+            const v = data.vehicle;
+            let url = '';
+            if (selectedLead.stock.vrm && v?.make && v?.model) {
+                url = `https://www.autotrader.co.uk/car-details/${selectedLead.stock.stockId}`;
+            } else if (selectedLead.stock.stockId) {
+                url = `https://www.autotrader.co.uk/car-details/${selectedLead.stock.stockId}`;
+            }
+            const make = v?.make || selectedLead.stock.make || '';
+            const model = v?.model || selectedLead.stock.model || '';
+            const vrm = selectedLead.stock.vrm || '';
+            const desc = [make, model, vrm].filter(Boolean).join(' ');
+            setNewMessage(`To view this vehicle${desc ? ` (${desc})` : ''} on AutoTrader, please visit: ${url}`);
+        } catch {
+            toast.error('Could not fetch vehicle link.');
+        }
+    };
+
+    const handleOpenMedia = async () => {
+        if (!selectedLead?.stock?.stockId) return;
+        setLoadingMedia(true);
+        setShowMediaModal(true);
+        setSelectedImages(new Set());
+        try {
+            const res = await fetch(`/api/vehicles/${selectedLead.stock.stockId}`);
+            const data = await res.json();
+            const imgs: string[] = data.vehicle?.images || [];
+            setVehicleImages(imgs);
+        } catch {
+            toast.error('Could not load vehicle images.');
+        } finally {
+            setLoadingMedia(false);
+        }
+    };
+
+    const handleSendMedia = () => {
+        const urls = [...selectedImages].map(i => vehicleImages[i]).filter(Boolean);
+        if (urls.length === 0) { toast.error('Select at least one image.'); return; }
+        setNewMessage(urls.join('\n'));
+        setShowMediaModal(false);
+        setSelectedImages(new Set());
     };
 
     const submitCreateLead = async () => {
@@ -787,12 +839,12 @@ function CRMContent() {
                                         )}
                                         <div className="flex gap-1 mb-1 flex-wrap">
                                             <Link href={`/app/vehicles/${selectedLead.stock.stockId}`} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">View</Link>
-                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Send Link</button>
-                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Media</button>
+                                            <button onClick={handleSendLink} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Send Link</button>
+                                            <button onClick={handleOpenMedia} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Media</button>
                                         </div>
                                         <div className="flex gap-1 flex-wrap">
-                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Create Order</button>
-                                            <button className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Sell Vehicle</button>
+                                            <Link href={`/app/sales/orders/create?stockId=${selectedLead.stock.stockId}`} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Create Order</Link>
+                                            <Link href={`/app/vehicles/${selectedLead.stock.stockId}`} className="px-2 py-1 text-[10px] font-semibold border border-slate-200 rounded hover:bg-slate-50 text-slate-600">Sell Vehicle</Link>
                                         </div>
                                     </div>
                                 ) : (
@@ -964,6 +1016,62 @@ function CRMContent() {
                             <button onClick={submitCreateLead} disabled={isCreatingLead} className="px-5 py-2 text-[13px] font-semibold text-white bg-[#3eb6cd] hover:bg-[#37a3b8] rounded-lg min-w-[110px] flex items-center justify-center">
                                 {isCreatingLead ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Create Lead'}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Media Modal ── */}
+            {showMediaModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-[680px] max-h-[80vh] flex flex-col">
+                        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+                            <h2 className="text-[15px] font-bold text-slate-800">Select Media To Send</h2>
+                            <button onClick={() => setShowMediaModal(false)} className="text-slate-400 hover:text-slate-600">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4">
+                            {loadingMedia ? (
+                                <div className="flex justify-center items-center h-40">
+                                    <div className="w-8 h-8 border-4 border-slate-100 border-t-[#3eb6cd] rounded-full animate-spin" />
+                                </div>
+                            ) : vehicleImages.length === 0 ? (
+                                <div className="text-center py-12 text-slate-400 text-[13px]">No images available for this vehicle.</div>
+                            ) : (
+                                <div className="grid grid-cols-5 gap-2">
+                                    {vehicleImages.map((url, i) => (
+                                        <div
+                                            key={i}
+                                            onClick={() => setSelectedImages(prev => {
+                                                const next = new Set(prev);
+                                                next.has(i) ? next.delete(i) : next.add(i);
+                                                return next;
+                                            })}
+                                            className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${selectedImages.has(i) ? 'border-[#3eb6cd] ring-2 ring-[#3eb6cd]/30' : 'border-transparent hover:border-slate-300'}`}
+                                        >
+                                            <img src={url} alt={`Vehicle ${i + 1}`} className="w-full h-20 object-cover" />
+                                            {selectedImages.has(i) && (
+                                                <div className="absolute top-1 right-1 w-5 h-5 bg-[#3eb6cd] rounded-full flex items-center justify-center">
+                                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between shrink-0">
+                            <div className="flex gap-2">
+                                <button onClick={() => setSelectedImages(new Set(vehicleImages.map((_, i) => i)))} className="px-4 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-50">Select All</button>
+                                <button onClick={() => setSelectedImages(new Set())} className="px-4 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-50">None</button>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setShowMediaModal(false)} className="px-4 py-2 border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-50">Close</button>
+                                <button onClick={handleSendMedia} disabled={selectedImages.size === 0} className="px-5 py-2 bg-[#3eb6cd] text-white rounded-lg text-[12px] font-bold hover:bg-[#37a3b8] disabled:opacity-40 transition-colors">
+                                    Send via Email Template
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

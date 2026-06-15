@@ -156,7 +156,7 @@ export function DashboardClient({ vehicleStats }: { vehicleStats: VehicleStats }
 
     useEffect(() => {
         if (!autoRefresh) return;
-        const id = setInterval(() => setTick(t => t + 1), 60_000);
+        const id = setInterval(() => setTick(t => t + 1), 300_000);
         return () => clearInterval(id);
     }, [autoRefresh]);
 

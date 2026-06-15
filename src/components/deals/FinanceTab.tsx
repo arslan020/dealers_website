@@ -113,6 +113,7 @@ export default function FinanceTab({ dealId, existingApplicationId, dealPrice, c
     const [submitting, setSubmitting] = useState(false);
     const [toast, setToast] = useState('');
     const [toastType, setToastType] = useState<'ok' | 'err'>('ok');
+    const [capabilityWarning, setCapabilityWarning] = useState('');
     const [showQuotes, setShowQuotes] = useState(false);
 
     // ── Create form state ─────────────────────────────────────────────────────
@@ -176,8 +177,16 @@ export default function FinanceTab({ dealId, existingApplicationId, dealPrice, c
                 }),
             });
             const data = await res.json();
-            if (data.ok) { setApplication(data.application); showToast('Finance application created.'); }
-            else showToast(data.error || 'Failed to create application.', 'err');
+            if (data.ok) {
+                setApplication(data.application);
+                showToast('Finance application created.');
+            } else {
+                if (data.warning && data.warning.toLowerCase().includes('incorrect products')) {
+                    setCapabilityWarning(data.warning);
+                } else {
+                    showToast(data.error || 'Failed to create application.', 'err');
+                }
+            }
         } finally { setSubmitting(false); }
     };
 
@@ -231,6 +240,19 @@ export default function FinanceTab({ dealId, existingApplicationId, dealPrice, c
     if (!existingApplicationId && !application) {
         return (
             <div className="p-5">
+                {capabilityWarning && (
+                    <div className="mb-5 flex gap-3 px-4 py-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <svg className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                        <div>
+                            <p className="text-[13px] font-bold text-amber-800">Finance API Not Enabled</p>
+                            <p className="text-[12px] text-amber-700 mt-1">
+                                Your AutoTrader account does not have the Finance product enabled. Please contact AutoTrader support to activate Finance capabilities for your advertiser account.
+                            </p>
+                        </div>
+                    </div>
+                )}
                 {toast && (
                     <div className={`mb-4 px-4 py-2.5 rounded-lg text-[12px] font-semibold ${toastType === 'ok' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
                         {toast}

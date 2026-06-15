@@ -60,19 +60,16 @@ async function getCompetitors(req: NextRequest) {
         }
 
         // Step 1: Fetch AT-curated competitor URL via /vehicles?competitors=true.
-        // Cache this per VRM since competitor URL doesn't change often.
+        // Reuse lookupVehicle cache (includes competitors=true) to avoid a redundant AT call.
         let vehicleData: any = null;
         let competitorUrl: string | undefined;
 
         try {
+            const lookupCacheKey = `vehicle:${client.dealerId}:${vrm}`;
             const compVrmKey = `vrm:comp-url:${vrm}`;
-            vehicleData = ATCache.get(compVrmKey);
+            vehicleData = ATCache.get(lookupCacheKey) || ATCache.get(compVrmKey);
             if (!vehicleData) {
-                vehicleData = await client.get('/vehicles', {
-                    registration: vrm,
-                    advertiserId: client.dealerId || '',
-                    competitors: 'true',
-                });
+                vehicleData = await client.lookupVehicle(vrm);
                 if (vehicleData?.vehicle) ATCache.set(compVrmKey, vehicleData, TTL.VRM_LOOKUP);
             }
 

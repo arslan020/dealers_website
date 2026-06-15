@@ -258,6 +258,20 @@ async function lookupVehicle(req: NextRequest) {
     } catch (error: any) {
         console.error('[VRM Lookup Error]', error.message);
 
+        if (error.status === 400) {
+            return NextResponse.json({
+                ok: false,
+                error: { message: 'Invalid number plate format. Please check the VRM and try again.', code: 'INVALID_VRM' }
+            }, { status: 400 });
+        }
+
+        if (error.status === 404) {
+            return NextResponse.json({
+                ok: false,
+                error: { message: 'No vehicle found for this number plate.', code: 'NOT_FOUND' }
+            }, { status: 404 });
+        }
+
         const userMessage = error.message?.includes('not configured') || error.message?.includes('not set')
             ? error.message
             : 'Failed to look up this number plate. Please check the VRM and try again.';

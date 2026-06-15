@@ -40,10 +40,11 @@ export const ATCache = {
 
 // TTLs in seconds
 export const TTL = {
-    TAXONOMY: 86400,   // 24 hr — makes/models/generations almost never change
+    TAXONOMY:   86400, // 24 hr — makes/models/generations almost never change
     DERIVATIVE: 86400, // 24 hr — derivative specs are static
-    VRM_LOOKUP: 3600,  // 1 hr  — registration data is stable
+    VRM_LOOKUP:  3600, // 1 hr  — registration data is stable
     VRM_CHECK:  86400, // 24 hr — vehicle history rarely changes in a day
+    STOCK_ITEM:   300, // 5 min — prevents repeat AT calls on refresh; invalidated on save
 };
 
 /**
@@ -52,7 +53,7 @@ export const TTL = {
  * Subsequent saves within AT_COOLDOWN_MS are skipped for AT (MongoDB still updates).
  * Prevents 30+ AT calls per editing session for one vehicle.
  */
-const AT_COOLDOWN_MS = 3000;
+const AT_COOLDOWN_MS = 120000;
 const atLastSent = new Map<string, number>();
 
 /**
@@ -70,4 +71,20 @@ export function shouldSendToAt(stockId: string, forceThrough = false): boolean {
         return true;
     }
     return false;
+}
+
+/**
+ * Per-stockId: the last full payload successfully sent to AT.
+ * Used as the diff source to prevent 202 no-change PATCHes.
+ * Stored as JSON string to avoid accidental mutation.
+ */
+const atLastPayload = new Map<string, string>();
+
+export function getLastAtPayload(stockId: string): any | null {
+    const s = atLastPayload.get(stockId);
+    return s ? JSON.parse(s) : null;
+}
+
+export function setLastAtPayload(stockId: string, payload: any): void {
+    atLastPayload.set(stockId, JSON.stringify(payload));
 }

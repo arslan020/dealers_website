@@ -11,7 +11,9 @@ interface Deal {
     advertiserDealStatus: string;
     consumerDealStatus: string;
     consumer: { firstName: string; lastName: string; email: string; phone?: string | null; type?: string | null };
-    stock: { stockId: string; searchId?: string; vrm?: string };
+    stock: { stockId: string; searchId?: string; vrm?: string | null };
+    vehicleId?: string | null;
+    customerId?: string | null;
     price?: { suppliedPrice?: { amountGBP: number }; totalPrice?: { amountGBP: number } };
     reservation?: { status: string | null; fee?: { amountGBP: number; status: string } };
     messages?: { id: string; lastUpdated: string } | null;
@@ -197,7 +199,13 @@ export default function SalesDealsPage() {
                                         </td>
                                         {/* VEHICLE */}
                                         <td className="px-4 py-3">
-                                            <span className="text-[13px] font-bold text-[#4D7CFF]">{vrm}</span>
+                                            {deal.vehicleId ? (
+                                                <Link href={`/app/vehicles/${deal.vehicleId}`} className="text-[13px] font-bold text-[#4D7CFF] hover:underline font-mono">
+                                                    {vrm}
+                                                </Link>
+                                            ) : (
+                                                <span className="text-[13px] font-bold text-[#4D7CFF] font-mono">{vrm}</span>
+                                            )}
                                         </td>
                                         {/* CUSTOMER */}
                                         <td className="px-4 py-3">
@@ -215,9 +223,15 @@ export default function SalesDealsPage() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <span className="text-[13px] font-semibold text-[#4D7CFF]">
-                                                        {deal.consumer.firstName} {deal.consumer.lastName}
-                                                    </span>
+                                                    {deal.customerId ? (
+                                                        <Link href={`/app/sales/contacts?id=${deal.customerId}`} className="text-[13px] font-semibold text-[#4D7CFF] hover:underline">
+                                                            {deal.consumer.firstName} {deal.consumer.lastName}
+                                                        </Link>
+                                                    ) : (
+                                                        <span className="text-[13px] font-semibold text-[#4D7CFF]">
+                                                            {deal.consumer.firstName} {deal.consumer.lastName}
+                                                        </span>
+                                                    )}
                                                     {customerActive && (
                                                         <p className="text-[10px] font-bold text-emerald-600 leading-none mt-0.5">● Active now</p>
                                                     )}

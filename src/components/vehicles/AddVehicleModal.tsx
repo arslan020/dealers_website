@@ -262,164 +262,63 @@ export function AddVehicleModal({ open, onClose }: { open: boolean; onClose: () 
             )}
 
             {step === 2 && (
-                <div className="relative w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl overflow-hidden shadow-2xl border border-slate-200 bg-[#F4F6FA] animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white border-b border-slate-100 flex-shrink-0 shadow-sm">
-                        <button
-                            type="button"
-                            onClick={() => setStep(1)}
-                            className="flex items-center gap-2 text-[12px] font-bold text-slate-500 hover:text-slate-900 transition-colors group"
-                        >
-                            <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-slate-200 transition-colors">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                                </svg>
-                            </div>
-                            New Search
-                        </button>
-                        <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Vehicle Confirmation</div>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="text-[12px] font-bold text-slate-500 hover:text-slate-900 px-3 py-1.5 rounded-lg hover:bg-slate-100"
-                        >
-                            Close
+                <div className="relative w-full max-w-md flex flex-col rounded-2xl overflow-hidden shadow-2xl border border-slate-200 bg-white animate-in fade-in zoom-in-95 duration-200">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                        <h2 className="text-[15px] font-bold text-slate-900">Confirm Vehicle</h2>
+                        <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 transition-colors">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
                         </button>
                     </div>
 
-                    <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-                        <div
-                            className="relative md:w-[40%] flex-shrink-0 flex flex-col overflow-y-auto p-5 sm:p-6"
-                            style={{ background: `linear-gradient(145deg, ${makeColor}12 0%, #F4F6FA 70%)` }}
+                    {/* Body */}
+                    <div className="px-5 py-5">
+                        <div className="flex items-center gap-3 mb-5">
+                            <div className="w-10 h-10 shrink-0">
+                                <BrandLogo make={vehicleData.make || ''} />
+                            </div>
+                            <p className="text-[13px] text-slate-500">Is this the correct vehicle?</p>
+                        </div>
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                            {[
+                                { label: 'Registration', value: vrm },
+                                { label: 'Country', value: 'UNITED KINGDOM' },
+                                { label: 'Manufacturer', value: (vehicleData.make || '').toUpperCase() },
+                                { label: 'Year', value: vehicleData.year },
+                                { label: 'Colour', value: (vehicleData.colour || '').toUpperCase() },
+                            ].map((row, i, arr) => (
+                                <div key={i} className={`flex items-center px-4 py-3 ${i < arr.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                                    <span className="text-[12px] text-slate-400 w-32 shrink-0">{row.label}</span>
+                                    <span className="text-[13px] font-bold text-slate-900">{row.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-slate-100">
+                        <button
+                            type="button"
+                            onClick={() => setStep(1)}
+                            className="px-5 py-2.5 rounded-lg text-[13px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
                         >
-                            <div
-                                className="absolute -top-16 -left-16 w-72 h-72 rounded-full blur-3xl opacity-10 pointer-events-none"
-                                style={{ background: makeColor }}
-                            />
-
-                            <div className="flex flex-col gap-5 relative z-10">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-stretch rounded-xl overflow-hidden shadow-lg border border-slate-200">
-                                        <div className="bg-[#003399] flex flex-col items-center justify-center px-2 py-2 gap-1">
-                                            <span className="text-white text-[7px] font-black tracking-wider">GB</span>
-                                            <svg viewBox="0 0 60 40" className="w-5 h-3">
-                                                <rect width="60" height="40" fill="#012169"/>
-                                                <path d="M0,0 L60,40 M60,0 L0,40" stroke="white" strokeWidth="8"/>
-                                                <path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" strokeWidth="4"/>
-                                                <path d="M30,0 V40 M0,20 H60" stroke="white" strokeWidth="12"/>
-                                                <path d="M30,0 V40 M0,20 H60" stroke="#C8102E" strokeWidth="8"/>
-                                            </svg>
-                                        </div>
-                                        <div className="bg-[#FFC200] px-4 sm:px-5 py-2 flex items-center">
-                                            <span className="text-slate-900 font-black text-[16px] sm:text-[20px] tracking-[0.2em]" style={{ fontFamily: 'monospace' }}>{vrm}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-full shrink-0">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                        <span className="text-emerald-700 text-[10px] sm:text-[11px] font-black uppercase tracking-wider">Verified</span>
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-col items-center gap-3">
-                                    <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl flex items-center justify-center p-4 sm:p-5 shadow-xl border border-slate-200 bg-white">
-                                        <BrandLogo make={vehicleData.make || ''} />
-                                    </div>
-                                    <div className="text-center">
-                                        <div className="text-[11px] font-black text-slate-400 uppercase tracking-[0.25em] mb-2">
-                                            {vehicleData.make} · {vehicleData.vehicleModel}
-                                        </div>
-                                        <h3 className="text-[16px] sm:text-[18px] font-black text-slate-900 leading-snug">
-                                            {vehicleData.derivative || `${vehicleData.make} ${vehicleData.vehicleModel}`}
-                                        </h3>
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-wrap gap-1.5">
-                                    {[
-                                        vehicleData.year && { label: vehicleData.year },
-                                        vehicleData.fuelType && { label: vehicleData.fuelType },
-                                        vehicleData.transmission && { label: vehicleData.transmission },
-                                        vehicleData.bodyType && { label: vehicleData.bodyType },
-                                        vehicleData.engineSize && { label: `${vehicleData.engineSize}L` },
-                                        vehicleData.colour && { label: vehicleData.colour },
-                                    ].filter(Boolean).map((item: any, i: number) => (
-                                        <span key={i} className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 shadow-sm">
-                                            {item.label}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 flex flex-col min-h-0 border-t md:border-t-0 md:border-l border-slate-200 bg-white">
-                            <div className="flex-1 overflow-y-auto p-5 sm:p-6">
-                                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">Vehicle Specifications</h3>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    {[
-                                        { label: 'Make', value: vehicleData.make },
-                                        { label: 'Model', value: vehicleData.vehicleModel },
-                                        { label: 'Year', value: vehicleData.year },
-                                        { label: 'Colour', value: vehicleData.colour },
-                                        { label: 'Fuel Type', value: vehicleData.fuelType },
-                                        { label: 'Transmission', value: vehicleData.transmission },
-                                        { label: 'Body Type', value: vehicleData.bodyType },
-                                        { label: 'Engine Size', value: vehicleData.engineSize ? `${vehicleData.engineSize}L` : null },
-                                        { label: 'Doors', value: vehicleData.doors },
-                                        { label: 'Seats', value: vehicleData.seats },
-                                        { label: 'Drivetrain', value: vehicleData.drivetrain },
-                                        { label: 'Driver Position', value: vehicleData.driverPosition },
-                                        { label: 'Generation', value: vehicleData.generation },
-                                        { label: 'Trim', value: vehicleData.trim },
-                                        { label: 'Derivative ID', value: vehicleData.derivativeId },
-                                    ].filter(s => s.value).map((spec, i) => (
-                                        <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 hover:bg-slate-100 transition-colors">
-                                            <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{spec.label}</div>
-                                            <div className="text-[12px] font-bold text-slate-800">{String(spec.value)}</div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
-                                    <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Saved as Draft</div>
-                                    <div className="text-[12px] text-blue-500 font-medium leading-relaxed">
-                                        Price, mileage, and other details can be set on the vehicle edit page before adding to stock.
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex-shrink-0 border-t border-slate-100 p-4 sm:p-5 bg-white">
-                                <button
-                                    type="button"
-                                    onClick={handleAddToStock}
-                                    disabled={loading}
-                                    className="w-full py-4 rounded-2xl font-black text-[15px] uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg relative overflow-hidden group disabled:opacity-60 disabled:cursor-not-allowed text-white"
-                                    style={{
-                                        background: makeColor,
-                                        boxShadow: loading ? 'none' : `0 8px 32px ${makeColor}40`,
-                                    }}
-                                >
-                                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        style={{ background: 'rgba(0,0,0,0.06)' }}
-                                    />
-                                    {loading ? (
-                                        <>
-                                            <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                                            <span>Saving as Draft...</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                                            </svg>
-                                            <span>Save as Draft</span>
-                                        </>
-                                    )}
-                                </button>
-                                <p className="text-center text-[11px] text-slate-400 font-medium mt-3">
-                                    Vehicle will be saved and the edit page will open
-                                </p>
-                            </div>
-                        </div>
+                            Back
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleAddToStock}
+                            disabled={loading}
+                            className="px-5 py-2.5 rounded-lg text-[13px] font-semibold text-white bg-[#4D7CFF] hover:bg-blue-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                            {loading ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                    Saving...
+                                </>
+                            ) : 'Correct Vehicle'}
+                        </button>
                     </div>
                 </div>
             )}

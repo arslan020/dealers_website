@@ -33,6 +33,7 @@ interface VehicleDetail {
     year: string | number;
     mileage: number;
     price: number;
+    forecourtPrice?: number;
     status: string;
     images: string[];
     imageIds?: string[];
@@ -176,9 +177,50 @@ const FUEL_TYPES = [
 const TRANSMISSIONS = ['Automatic', 'Manual'];
 const BODY_TYPES = ['Saloon', 'Hatchback', 'Estate', 'SUV', 'Coupe', 'Convertible', 'Van', 'Pickup', 'MPV', 'Crossover'];
 const VEHICLE_TYPES = ['Car', 'Van', 'Motorbike', 'Motorhome'];
-const COLOURS = ['Black', 'White', 'Silver', 'Grey', 'Blue', 'Red', 'Green', 'Brown', 'Beige', 'Orange', 'Yellow', 'Gold', 'Purple', 'Bronze', 'Burgundy', 'Copper', 'Maroon', 'Navy', 'Turquoise'];
+// AT-aligned colour list (matches AutoTrader portal exactly)
+const COLOURS = ['Black', 'Blue', 'Bronze', 'Brown', 'Burgundy', 'Gold', 'Green', 'Grey', 'Indigo', 'Magenta', 'Maroon', 'Multicolour', 'Navy', 'Orange', 'Pink', 'Purple', 'Red', 'Silver', 'Tan', 'Turquoise', 'White', 'Yellow'];
 const EXTERIOR_FINISHES = ['Metallic', 'Solid', 'Pearl', 'Matte', 'Satin'];
-const INTERIOR_UPHOLSTERIES = ['Leather', 'Cloth', 'Alcantara', 'Suede', 'Vinyl', 'Half Leather', 'Leatherette'];
+// AT accepted values for upholstery field
+const INTERIOR_UPHOLSTERIES = ['Cloth', 'Part leather', 'Full leather', 'Part suede', 'Full suede', 'Velour', 'Vinyl'];
+
+/* ─── Per-tab save / AT sync (each tab syncs only its own fields) ─────────── */
+const VEHICLE_TAB_KEYS = [
+    'vehicleType', 'make', 'model', 'generation', 'trim', 'engineSize', 'fuelType',
+    'transmission', 'driverPosition', 'drivetrain', 'derivative', 'bodyType', 'seats', 'doors',
+    'colour', 'colourName', 'exteriorFinish', 'interiorUpholstery', 'interiorColour',
+    'mileage', 'dateOfRegistration',
+] as const;
+
+const STOCK_PRICE_TAB_KEYS = [
+    'referenceId', 'vin', 'engineNumber', 'newKeeperReference', 'keyReference',
+    'dueInDate', 'dateOnForecourt', 'location', 'origin', 'saleOrReturn', 'demonstrator', 'trade',
+    'stockNotes', 'vatStatus', 'dateInStock', 'keyTags', 'reservePaymentAmount', 'quantityAvailable',
+] as const;
+
+const PURCHASE_TAB_KEYS = [
+    'purchaseDate', 'supplierName', 'supplierInvoiceNo', 'purchasePrice', 'vatType',
+    'fundingProvider', 'fundingAmount',
+] as const;
+
+type VehicleSaveTabId = 'overview' | 'vehicle' | 'stockPrice' | 'purchase' | 'options';
+
+function pickKeys(obj: Record<string, any>, keys: readonly string[]) {
+    const out: Record<string, any> = {};
+    for (const k of keys) {
+        if (obj[k] !== undefined && obj[k] !== '') out[k] = obj[k];
+    }
+    return out;
+}
+
+function tabSnapshot(data: unknown) {
+    return JSON.stringify(data);
+}
+
+function tabSaveButtonClass(dirty: boolean, saving: boolean) {
+    return dirty && !saving
+        ? 'px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm flex items-center gap-2 cursor-pointer'
+        : 'px-6 py-2.5 bg-slate-200 text-slate-400 rounded-md text-[13px] font-bold transition-all flex items-center gap-2 cursor-not-allowed opacity-50';
+}
 
 /* ─── Sidebar Tab Groups ──────────────────────────────────────────────────── */
 const TAB_GROUPS = [
@@ -728,7 +770,6 @@ function CompetitorsTab({ vehicle }: { vehicle: any }) {
         if (autoSearchedVrmRef.current === vrm) return;
         autoSearchedVrmRef.current = vrm;
         doSearch(25);
-        fetchFilterPool();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [vehicle?.vrm]);
 
@@ -2569,7 +2610,7 @@ function HistoryTab({
 }: {
     vehicle: VehicleDetail;
     saving: boolean;
-    onSave: (fields: Record<string, any>) => void;
+    onSave: (fields: Record<string, any>) => Promise<boolean>;
     onVinFound?: (vin: string, engineNumber?: string) => void;
     checkData?: any;
 }) {
@@ -2671,12 +2712,17 @@ function HistoryTab({
     const mfgRemaining = calcRemainingMonths(fields.manufacturerWarrantyExpiry as string);
     const batRemaining = calcRemainingMonths(fields.batteryWarrantyExpiry as string);
 
-    const handleSave = () => {
+    const [savedBaseline, setSavedBaseline] = useState(() => tabSnapshot(fields));
+    const historyDirty = tabSnapshot(fields) !== savedBaseline;
+
+    const handleSave = async () => {
+        if (!historyDirty) return;
         const payload: Record<string, any> = {};
         for (const [k, v] of Object.entries(fields)) {
             if (v !== '' && v !== undefined && v !== null) payload[k] = v;
         }
-        onSave(payload);
+        const ok = await onSave(payload);
+        if (ok) setSavedBaseline(tabSnapshot(fields));
     };
 
     // ── MotorDesk-style sub-components ─────────────────────────────────────
@@ -2871,12 +2917,13 @@ function HistoryTab({
 
             {/* ── Buttons ──────────────────────────────────────── */}
             <div className="flex items-center gap-3 pt-1">
-                <button onClick={handleSave} disabled={saving} className="px-5 py-2 bg-[#2B7CB5] text-white text-[13px] font-semibold rounded hover:bg-[#1f6599] disabled:opacity-60 transition-colors">
+                <button onClick={handleSave} disabled={saving || !historyDirty} className={`px-5 py-2 text-[13px] font-semibold rounded transition-colors ${historyDirty && !saving ? 'bg-[#2B7CB5] text-white hover:bg-[#1f6599] cursor-pointer' : 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed'}`}>
                     {saving ? 'Saving...' : 'Save'}
                 </button>
-                <button onClick={handleSave} disabled={saving} className="px-5 py-2 bg-[#2B7CB5] text-white text-[13px] font-semibold rounded hover:bg-[#1f6599] disabled:opacity-60 transition-colors">
+                <button onClick={handleSave} disabled={saving || !historyDirty} className={`px-5 py-2 text-[13px] font-semibold rounded transition-colors ${historyDirty && !saving ? 'bg-[#2B7CB5] text-white hover:bg-[#1f6599] cursor-pointer' : 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed'}`}>
                     Save &amp; Next →
                 </button>
+                {!historyDirty && <span className="text-[11px] text-slate-400">Edit a field to enable save</span>}
             </div>
         </div>
     );
@@ -3113,7 +3160,7 @@ function OptionsTab({
     editDescription, setEditDescription,
     editDescription2, setEditDescription2,
     editFeatures, setEditFeatures,
-    saving, onSave,
+    saving, onSave, saveDisabled = true,
     stockId,
     vehicleMake, vehicleFeatures, vehicleVrm, vehicleInfo,
     atOptions,
@@ -3136,6 +3183,7 @@ function OptionsTab({
     setEditFeatures: (v: string[]) => void;
     saving: boolean;
     onSave: () => void;
+    saveDisabled?: boolean;
     stockId?: string;
     vehicleMake?: string;
     vehicleFeatures?: string[];
@@ -4024,22 +4072,23 @@ function OptionsTab({
             </div>
 
             {/* Bottom Buttons */}
-            <div className="flex gap-3 pb-4">
+            <div className="flex flex-wrap items-center gap-3 pb-4">
                 <button
                     onClick={onSave}
-                    disabled={saving}
-                    className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md font-bold text-[13px] hover:bg-blue-600 transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                    disabled={saving || saveDisabled}
+                    className={tabSaveButtonClass(!saveDisabled, saving)}
                 >
                     {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    Save
+                    {saving ? 'Saving...' : 'Save'}
                 </button>
                 <button
                     onClick={onSave}
-                    disabled={saving}
-                    className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md font-bold text-[13px] hover:bg-blue-600 transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                    disabled={saving || saveDisabled}
+                    className={tabSaveButtonClass(!saveDisabled, saving)}
                 >
                     Save &amp; Next →
                 </button>
+                {saveDisabled && <span className="text-[11px] text-slate-400">Edit description or features to enable save</span>}
             </div>
 
             {/* Attention Grabber Modal */}
@@ -4271,6 +4320,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [editPrice, setEditPrice] = useState('');
     const [editForecourtPrice, setEditForecourtPrice] = useState('');
     const [editFields, setEditFields] = useState<Partial<VehicleDetail>>({});
+    const tabBaselinesRef = useRef<Partial<Record<VehicleSaveTabId, string>>>({});
+    const [tabDirtyGen, setTabDirtyGen] = useState(0);
+    const bumpTabBaselines = useCallback(() => setTabDirtyGen(g => g + 1), []);
     const [editDescription, setEditDescription] = useState('');
     const [editDescription2, setEditDescription2] = useState('');
     const [editAttentionGrabber, setEditAttentionGrabber] = useState('');
@@ -4299,7 +4351,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
     const [vehicleAdditionalCosts, setVehicleAdditionalCosts] = useState<any[]>([]);
     const [expandedCosts, setExpandedCosts] = useState<Record<string, boolean>>({});
 
-    // Taxonomy cascade
+    // Taxonomy cascade — only loaded when user opens the derivative/make-model section
+    const [taxonomyActive, setTaxonomyActive] = useState(false);
     const [taxMakes, setTaxMakes] = useState<{makeId: string; name: string}[]>([]);
     const [taxModels, setTaxModels] = useState<{modelId: string; name: string}[]>([]);
     const [taxGenerations, setTaxGenerations] = useState<{generationId: string; name: string}[]>([]);
@@ -4405,7 +4458,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         </div>
     );
 
-    // Auto-fill missing fields from AT derivative technical data when vehicle has a derivativeId
+    // Auto-fill missing fields from AT derivative technical data when vehicle has a derivativeId.
+    // Persists filled fields to DB (skipAT=true) so this call never repeats on subsequent page loads.
     useEffect(() => {
         if (!vehicle) return;
         const derivId = (vehicle as any).derivativeId;
@@ -4417,31 +4471,39 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
             .then(data => {
                 const d = data.derivative;
                 if (!d) return;
-                setEditFields(prev => ({
-                    ...prev,
-                    ...(!prev.engineSize && (d.badgeEngineSizeLitres || d.engineCapacityCC) ? { engineSize: d.badgeEngineSizeLitres ? String(d.badgeEngineSizeLitres) : String((d.engineCapacityCC / 1000).toFixed(1)) } : {}),
-                    ...(!prev.fuelType && d.fuelType ? { fuelType: d.fuelType } : {}),
-                    ...(!prev.seats && d.seats ? { seats: d.seats } : {}),
-                    ...(!prev.doors && d.doors ? { doors: d.doors } : {}),
-                    ...(!prev.transmission && d.transmissionType ? { transmission: d.transmissionType } : {}),
-                    ...(!prev.bodyType && d.bodyType ? { bodyType: d.bodyType } : {}),
-                    ...(!prev.drivetrain && d.drivetrain ? { drivetrain: d.drivetrain } : {}),
-                    ...(!prev.trim && d.trim ? { trim: d.trim } : {}),
-                }));
+                const filled: Record<string, any> = {
+                    ...(!vehicle.engineSize && (d.badgeEngineSizeLitres || d.engineCapacityCC) ? { engineSize: d.badgeEngineSizeLitres ? String(d.badgeEngineSizeLitres) : String((d.engineCapacityCC / 1000).toFixed(1)) } : {}),
+                    ...(!vehicle.fuelType && d.fuelType ? { fuelType: d.fuelType } : {}),
+                    ...(!vehicle.seats && d.seats ? { seats: d.seats } : {}),
+                    ...(!vehicle.doors && d.doors ? { doors: d.doors } : {}),
+                    ...(!vehicle.transmission && d.transmissionType ? { transmission: d.transmissionType } : {}),
+                    ...(!vehicle.bodyType && d.bodyType ? { bodyType: d.bodyType } : {}),
+                    ...(!vehicle.drivetrain && d.drivetrain ? { drivetrain: d.drivetrain } : {}),
+                    ...(!vehicle.trim && d.trim ? { trim: d.trim } : {}),
+                };
+                if (Object.keys(filled).length === 0) return;
+                setEditFields(prev => ({ ...prev, ...filled }));
+                // Persist to DB so needsFill is false on next page load — no repeat AT call
+                fetch('/api/vehicles', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: vehicle._id || id, skipAT: true, ...filled }),
+                }).catch(() => {});
             })
             .catch(() => {});
     }, [vehicle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Fetch makes whenever vehicleType changes (or on mount with default 'Car').
-    // This ensures Van/Bike/etc makes load correctly when type is set.
+    // Fetch makes only when user opens the derivative/make-model section (taxonomyActive=true).
+    // This prevents taxonomy calls on every page load — AT requires these only on derivative change.
     useEffect(() => {
+        if (!taxonomyActive) return;
         const vt = (editFields.vehicleType as string) || 'Car';
         fetch(`/api/vehicles/taxonomy?resource=makes&vehicleType=${encodeURIComponent(vt)}`)
             .then(r => r.json()).then(d => setTaxMakes(d.makes || [])).catch(() => {});
         // Reset downstream cascade when type changes
         setTaxModels([]); setTaxGenerations([]); setTaxTrims([]);
         setTaxModelId(''); setTaxGenerationId('');
-    }, [editFields.vehicleType]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [taxonomyActive, editFields.vehicleType]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Once makes list loads + vehicle has a make, cascade-init the full chain.
     // Depends on both taxMakes (populated above) AND editFields.make (populated
@@ -4772,7 +4834,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 if (!specs || Object.keys(specs).length === 0) return;
                                 // Persist to DB — also save vin if missing
                                 const vinFromLookup = lookupData.vehicle?.vin || '';
-                                const patchBody: Record<string, any> = { id: v._id || id, technicalSpecs: specs };
+                                const patchBody: Record<string, any> = { id: v._id || id, technicalSpecs: specs, skipAT: true };
                                 if (!v.vin && vinFromLookup) patchBody.vin = vinFromLookup;
                                 fetch('/api/vehicles', {
                                     method: 'PATCH',
@@ -4846,6 +4908,9 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                         serviceHistory: vehicleData.serviceHistory || 'Full',
                         previousOwners: vehicleData.history?.previousOwners || vehicleData.previousOwners || 1,
                         dateOfRegistration: vehicleData.dateOfRegistration || '',
+                        interiorCondition: vehicleData.interiorCondition || '',
+                        exteriorCondition: vehicleData.exteriorCondition || '',
+                        tyreCondition: vehicleData.tyreCondition || '',
                     });
                     setEditDescription(vehicleData.description || '');
                     setEditDescription2(vehicleData.description2 || '');
@@ -5013,7 +5078,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                 fetch('/api/vehicles', {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: vehicle?._id || id, ...updates }),
+                    body: JSON.stringify({ id: vehicle?._id || id, ...updates, skipAT: true }),
                 });
                 setVehicle(prev => prev ? { ...prev, ...updates } : null);
                 setEditFields(prev => ({ ...prev, ...updates }));
@@ -5035,23 +5100,32 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
 
 
     /* ─── Save Handlers ────────────────────────────────────────────────────── */
-    const patchVehicle = useCallback(async (updates: Record<string, any>) => {
+    // syncToAT=true  → save to DB + sync to AutoTrader (used by main Save Updates button)
+    // syncToAT=false → save to DB only, skip AT (used by individual tab Save buttons)
+    const patchVehicle = useCallback(async (updates: Record<string, any>, syncToAT = false) => {
         setSaving(true);
-        setAtSyncStatus('syncing');
+        setAtSyncStatus(syncToAT ? 'syncing' : 'idle');
         try {
             const vehicleId = vehicle?._id || id;
             const res = await fetch('/api/vehicles', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: vehicleId, ...updates }),
+                body: JSON.stringify({ id: vehicleId, ...updates, ...(syncToAT ? {} : { skipAT: true }) }),
             });
             const data = await res.json();
             if (data.ok) {
                 setVehicle(prev => prev ? { ...prev, ...updates } : null);
-                setAtSyncStatus('success');
-                toast.success('Saved & synced to AutoTrader ✓');
-                // Auto-reset badge after 5 seconds
-                setTimeout(() => setAtSyncStatus('idle'), 5000);
+                setEditFields(prev => ({ ...prev, ...updates }));
+                if (syncToAT && data.atSyncError) {
+                    setAtSyncStatus('failed');
+                    toast.error(`Saved locally — AutoTrader sync failed: ${data.atSyncError}`);
+                    return false;
+                }
+                setAtSyncStatus(syncToAT ? (data.atStockSynced ? 'success' : 'idle') : 'idle');
+                if (syncToAT && data.atStockSynced) toast.success('Saved & synced to AutoTrader ✓');
+                else if (syncToAT) toast('Saved locally — no AutoTrader changes to send', { icon: 'ℹ️' });
+                else toast.success('Saved ✓');
+                if (syncToAT) setTimeout(() => setAtSyncStatus('idle'), 5000);
                 return true;
             } else {
                 const errorMsg = typeof data.error === 'string' ? data.error : (data.error?.message || 'Save failed');
@@ -5068,47 +5142,165 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         }
     }, [vehicle, id]);
 
-    const handleSaveVehicleFields = () => {
-        const payload = {
-            ...editFields,
-            year: Number(editFields.year) || undefined,
-            mileage: Number(editFields.mileage) || undefined,
-            seats: Number(editFields.seats) || undefined,
-            doors: Number(editFields.doors) || undefined,
-            purchasePrice: Number(editFields.purchasePrice) || undefined,
-            retailPrice: Number(editFields.retailPrice) || undefined,
-            previousOwners: Number(editFields.previousOwners) || undefined,
-            fundingAmount: editFields.fundingAmount !== undefined ? Number(editFields.fundingAmount) || 0 : undefined,
-            price: Number(editPrice),
-            forecourtPrice: Number(editForecourtPrice) || undefined,
-            status: vehicle?.status || 'In Stock',
-            tags: pendingTags,
-        };
-        patchVehicle(payload);
-    };
+    const resolveForecourtPriceForSave = useCallback(() => {
+        const websitePrice = Number(editPrice) || 0;
+        const salesChannelInput = editForecourtPrice.trim();
+        const salesChannelNum = Number(salesChannelInput);
+        const prevWebsite = Number(vehicle?.price) || 0;
+        const prevSalesChannel = Number(vehicle?.forecourtPrice) || 0;
+        const linkedToWebsite = !salesChannelInput || !prevSalesChannel || prevSalesChannel === prevWebsite;
+        const staleSalesChannel = salesChannelInput && salesChannelNum === prevSalesChannel && prevSalesChannel !== websitePrice;
+        if (linkedToWebsite || staleSalesChannel) return websitePrice || undefined;
+        return salesChannelNum || undefined;
+    }, [editPrice, editForecourtPrice, vehicle?.price, vehicle?.forecourtPrice]);
 
-    const handleSaveWorkflow = () => patchVehicle({ workflowStages });
-    const handleSaveContent = () => patchVehicle({
+    const getOverviewSnapshot = useCallback(() => tabSnapshot({
+        status: vehicle?.status || 'In Stock',
+        tags: [...pendingTags].sort(),
+    }), [vehicle?.status, pendingTags]);
+
+    const getVehicleTabSnapshot = useCallback(() => tabSnapshot(
+        pickKeys(editFields as Record<string, any>, VEHICLE_TAB_KEYS)
+    ), [editFields]);
+
+    const getStockPriceSnapshot = useCallback(() => tabSnapshot({
+        ...pickKeys(editFields as Record<string, any>, STOCK_PRICE_TAB_KEYS),
+        price: editPrice,
+        forecourtPrice: editForecourtPrice,
+    }), [editFields, editPrice, editForecourtPrice]);
+
+    const getPurchaseSnapshot = useCallback(() => tabSnapshot(
+        pickKeys(editFields as Record<string, any>, PURCHASE_TAB_KEYS)
+    ), [editFields]);
+
+    const getOptionsSnapshot = useCallback(() => tabSnapshot({
         description: editDescription,
         description2: editDescription2,
         attentionGrabber: editAttentionGrabber,
         longAttentionGrabber: editLongAttentionGrabber,
-        features: editFeatures,
-        customFeatures: editCustomFeatures,
-        factoryFittedFeatures: editFeatures.filter(f => atFactoryFitted.has(f)),
-        // All standard features sent to AT as per AT docs requirement
-        standardFeatures: atStdFeatures.map(f => f.name),
-    });
+        features: [...editFeatures].sort(),
+        customFeatures: [...editCustomFeatures].sort(),
+    }), [editDescription, editDescription2, editAttentionGrabber, editLongAttentionGrabber, editFeatures, editCustomFeatures]);
+
+    const refreshTabBaselines = useCallback(() => {
+        tabBaselinesRef.current = {
+            overview: getOverviewSnapshot(),
+            vehicle: getVehicleTabSnapshot(),
+            stockPrice: getStockPriceSnapshot(),
+            purchase: getPurchaseSnapshot(),
+            options: getOptionsSnapshot(),
+        };
+        bumpTabBaselines();
+    }, [getOverviewSnapshot, getVehicleTabSnapshot, getStockPriceSnapshot, getPurchaseSnapshot, getOptionsSnapshot, bumpTabBaselines]);
+
+    const getTabSnapshot = useCallback((tab: VehicleSaveTabId): string => {
+        switch (tab) {
+            case 'overview': return getOverviewSnapshot();
+            case 'vehicle': return getVehicleTabSnapshot();
+            case 'stockPrice': return getStockPriceSnapshot();
+            case 'purchase': return getPurchaseSnapshot();
+            case 'options': return getOptionsSnapshot();
+        }
+    }, [getOverviewSnapshot, getVehicleTabSnapshot, getStockPriceSnapshot, getPurchaseSnapshot, getOptionsSnapshot]);
+
+    const isTabDirty = useCallback((tab: VehicleSaveTabId) => {
+        const base = tabBaselinesRef.current[tab];
+        if (!base) return false;
+        return getTabSnapshot(tab) !== base;
+    }, [tabDirtyGen, getTabSnapshot]);
+
+    const markTabSaved = useCallback((tab: VehicleSaveTabId) => {
+        tabBaselinesRef.current[tab] = getTabSnapshot(tab);
+        bumpTabBaselines();
+    }, [getTabSnapshot, bumpTabBaselines]);
+
+    const overviewTabDirty = isTabDirty('overview');
+    const vehicleTabDirty = isTabDirty('vehicle');
+    const stockPriceTabDirty = isTabDirty('stockPrice');
+    const purchaseTabDirty = isTabDirty('purchase');
+    const optionsTabDirty = isTabDirty('options');
+
+    const imagesTabDirty = useMemo(() => {
+        const isRealAtId = (s: string) => /^[a-f0-9]{32}$/i.test(String(s || ''));
+        const current = uploadedImages.map(i => i.imageId).filter(isRealAtId).join(',');
+        const saved = (savedImageIdsRef.current || []).filter(isRealAtId).join(',');
+        return current !== saved;
+    }, [uploadedImages, tabDirtyGen]);
+
+    const saveOverviewTab = async () => {
+        if (!overviewTabDirty) return;
+        const ok = await patchVehicle({
+            status: vehicle?.status || 'In Stock',
+            tags: pendingTags,
+        }, true);
+        if (ok) markTabSaved('overview');
+    };
+
+    const saveVehicleTab = async () => {
+        if (!vehicleTabDirty) return;
+        const payload = {
+            ...pickKeys(editFields as Record<string, any>, VEHICLE_TAB_KEYS),
+            mileage: Number(editFields.mileage) || undefined,
+            seats: Number(editFields.seats) || undefined,
+            doors: Number(editFields.doors) || undefined,
+        };
+        const ok = await patchVehicle(payload, true);
+        if (ok) markTabSaved('vehicle');
+    };
+
+    const saveStockPriceTab = async () => {
+        if (!stockPriceTabDirty) return;
+        const ok = await patchVehicle({
+            ...pickKeys(editFields as Record<string, any>, STOCK_PRICE_TAB_KEYS),
+            price: Number(editPrice),
+            forecourtPrice: resolveForecourtPriceForSave(),
+        }, true);
+        if (ok) markTabSaved('stockPrice');
+    };
+
+    const savePurchaseTab = async () => {
+        if (!purchaseTabDirty) return;
+        const ok = await patchVehicle({
+            ...pickKeys(editFields as Record<string, any>, PURCHASE_TAB_KEYS),
+            purchasePrice: Number(editFields.purchasePrice) || undefined,
+            fundingAmount: editFields.fundingAmount !== undefined ? Number(editFields.fundingAmount) || 0 : undefined,
+        }, true);
+        if (ok) markTabSaved('purchase');
+    };
+
+    const saveOptionsTab = async () => {
+        if (!optionsTabDirty) return;
+        const ok = await patchVehicle({
+            description: editDescription,
+            description2: editDescription2,
+            attentionGrabber: editAttentionGrabber,
+            longAttentionGrabber: editLongAttentionGrabber,
+            features: editFeatures,
+            customFeatures: editCustomFeatures,
+            factoryFittedFeatures: editFeatures.filter(f => atFactoryFitted.has(f)),
+            standardFeatures: atStdFeatures.map(f => f.name),
+        }, true);
+        if (ok) markTabSaved('options');
+    };
+
+    const handleSaveWorkflow = () => patchVehicle({ workflowStages }, false);
 
     const handleSaveImages = async () => {
-        // Only send valid AutoTrader imageIds (32 hex). UI may contain URL-only placeholders.
+        if (!imagesTabDirty) return;
         const isRealAtId = (s: string) => /^[a-f0-9]{32}$/i.test(String(s || ''));
         const imageIds = uploadedImages.map(i => i.imageId).filter(isRealAtId);
-        const ok = await patchVehicle({ imageIds });
+        const ok = await patchVehicle({ imageIds }, true);
         if (ok) {
             savedImageIdsRef.current = imageIds;
+            bumpTabBaselines();
         }
     };
+
+    useEffect(() => {
+        if (!vehicle || loading) return;
+        refreshTabBaselines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [vehicle?._id, loading]);
 
     const handleStatusChange = (newStatus: string) => {
         // Only update local state — user must click Save Updates to persist
@@ -5126,85 +5318,83 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
         profileAdvertStatus:    'profile',
     };
 
-    // Pending channel changes accumulator + debounce timer ref
+    // Pending channel changes: tracks what user has toggled but not yet saved
     const pendingChannelChanges = useRef<Record<string, string>>({});
-    const channelDebounceTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
     const channelPrevValues     = useRef<Record<string, string>>({});
+    const [hasPendingChannels, setHasPendingChannels] = useState(false);
 
-    // Toggle a channel — batches rapid consecutive toggles into one AT PATCH request
-    const toggleAndSave = async (chanKey: string) => {
+    // Toggle is local-only — no AT call until Save is clicked
+    const toggleChannel = (chanKey: string) => {
         if (!vehicle) return;
         if (!vehicle.stockId) {
             alert('No AutoTrader stock ID — create the stock record on AutoTrader first.');
             return;
         }
-
         const channelName = CHAN_KEY_TO_AT[chanKey];
         if (!channelName) return;
 
         const current = vehicle[chanKey as keyof VehicleDetail] as string;
         const next = current === 'PUBLISHED' ? 'NOT_PUBLISHED' : 'PUBLISHED';
 
-        // Save original value for rollback (only on first change)
+        // Track original value for rollback
         if (!(chanKey in channelPrevValues.current)) {
             channelPrevValues.current[chanKey] = current;
         }
 
-        // Accumulate change + optimistic UI update
         pendingChannelChanges.current[channelName] = next;
         setVehicle(prev => prev ? { ...prev, [chanKey]: next } : null);
-        setSavingChannel(chanKey);
+        setHasPendingChannels(true);
+    };
 
-        // Debounce: wait 400ms for more toggles before sending
-        if (channelDebounceTimer.current) clearTimeout(channelDebounceTimer.current);
-        channelDebounceTimer.current = setTimeout(async () => {
-            const channels = { ...pendingChannelChanges.current };
-            const prevValues = { ...channelPrevValues.current };
-            pendingChannelChanges.current = {};
-            channelPrevValues.current = {};
+    // Save all pending channel changes in ONE AT call
+    const saveChannels = async () => {
+        if (!vehicle?.stockId || !hasPendingChannels) return;
 
-            try {
-                const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        channels,
-                        attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
-                        description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
-                    }),
-                });
-                const data = await res.json();
-                if (!data.ok) throw new Error(data.error || 'Failed to update channel');
+        const channels = { ...pendingChannelChanges.current };
+        const prevValues = { ...channelPrevValues.current };
+        pendingChannelChanges.current = {};
+        channelPrevValues.current = {};
+        setHasPendingChannels(false);
+        setSavingChannel('all');
 
-                const actual = data.actualStatuses || {};
-                const localUpdates: Partial<VehicleDetail> = {};
-                for (const [lKey, atKey] of Object.entries(CHAN_KEY_TO_AT)) {
-                    if (channels[atKey] !== undefined) {
-                        localUpdates[lKey as keyof VehicleDetail] = actual[lKey] || channels[atKey];
-                    }
+        try {
+            const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    channels,
+                    attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
+                    description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
+                }),
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Failed to update channel');
+
+            const actual = data.actualStatuses || {};
+            const localUpdates: Partial<VehicleDetail> = {};
+            for (const [lKey, atKey] of Object.entries(CHAN_KEY_TO_AT)) {
+                if (channels[atKey] !== undefined) {
+                    localUpdates[lKey as keyof VehicleDetail] = actual[lKey] || channels[atKey];
                 }
-                setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
-                // advertise endpoint already persists statuses to local DB — no second PATCH needed.
-                // Calling patchVehicle here was doubling the AT API call (once via advertise, once via updateVehicle).
-
-                if (data.warnings?.length > 0) {
-                    const msgs = data.warnings.map((w: any) =>
-                        `${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`
-                    ).join('\n');
-                    alert(`Channel update warning:\n\n${msgs}`);
-                }
-            } catch (err: any) {
-                // Revert all optimistic updates on failure
-                const rollback: Partial<VehicleDetail> = {};
-                for (const [lKey, prev] of Object.entries(prevValues)) {
-                    (rollback as any)[lKey] = prev;
-                }
-                setVehicle(prev => prev ? { ...prev, ...rollback } : null);
-                alert(err.message || 'Failed to update channel');
-            } finally {
-                setSavingChannel(null);
             }
-        }, 400);
+            setVehicle(prev => prev ? { ...prev, ...localUpdates } : null);
+
+            if (data.warnings?.length > 0) {
+                data.warnings.forEach((w: any) => {
+                    toast.error(`${w.channel}: ${w.status}${w.message ? ` — ${w.message}` : ''}`);
+                });
+            }
+        } catch (err: any) {
+            const rollback: Partial<VehicleDetail> = {};
+            for (const [lKey, prev] of Object.entries(prevValues)) {
+                (rollback as any)[lKey] = prev;
+            }
+            setVehicle(prev => prev ? { ...prev, ...rollback } : null);
+            setHasPendingChannels(true);
+            alert(err.message || 'Failed to update channel');
+        } finally {
+            setSavingChannel(null);
+        }
     };
 
     const handleCreateAtStock = async () => {
@@ -5456,7 +5646,12 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                                                 <span>{textValue(vehicle.transmission) || 'Unknown'}</span>
                                                 <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                                                <span className="text-slate-800 font-bold">£{vehicle.price?.toLocaleString() || 'POA'}</span>
+                                                <span className="text-slate-800 font-bold" title="Website price — AutoTrader uses Sales Channel Price when set">
+                                                    £{(vehicle.price ?? vehicle.forecourtPrice)?.toLocaleString() || 'POA'}
+                                                    {vehicle.forecourtPrice && vehicle.forecourtPrice !== vehicle.price && (
+                                                        <span className="text-slate-400 font-medium ml-1">(AT £{vehicle.forecourtPrice.toLocaleString()})</span>
+                                                    )}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -5507,12 +5702,17 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 <option value="Sold">Sold</option>
                                             </select>
                                             <button
-                                                onClick={handleSaveVehicleFields}
-                                                disabled={saving}
-                                                className="h-10 px-6 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm flex items-center gap-2 whitespace-nowrap"
+                                                onClick={saveOverviewTab}
+                                                disabled={saving || !overviewTabDirty}
+                                                title={overviewTabDirty ? 'Save status to database & AutoTrader' : 'Change status to enable save'}
+                                                className={`h-10 px-6 rounded-md text-[13px] font-bold transition-all shadow-sm flex items-center gap-2 whitespace-nowrap ${
+                                                    overviewTabDirty && !saving
+                                                        ? 'bg-[#4D7CFF] text-white hover:bg-blue-600 cursor-pointer'
+                                                        : 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-50'
+                                                }`}
                                             >
                                                 {saving ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : null}
-                                                Save Updates
+                                                {overviewTabDirty ? 'Save Status' : 'Save Status'}
                                             </button>
                                         </div>
                                     </div>
@@ -5763,6 +5963,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                             <FieldLabel>Manufacturer</FieldLabel>
                                             <select
                                                 value={textValue(editFields.make) || ''}
+                                                onFocus={() => setTaxonomyActive(true)}
                                                 onChange={e => {
                                                     const found = taxMakes.find(m => m.name === e.target.value);
                                                     updateField('make', e.target.value);
@@ -5955,22 +6156,23 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 </div>
 
                                 {/* Floating Action Bar within the Tab Content */}
-                                <div className="flex justify-start gap-2 pt-4">
+                                <div className="flex flex-wrap items-center gap-2 pt-4">
                                     <button
-                                        onClick={handleSaveVehicleFields}
-                                        disabled={saving}
-                                        className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                                        onClick={saveVehicleTab}
+                                        disabled={saving || !vehicleTabDirty}
+                                        className={tabSaveButtonClass(vehicleTabDirty, saving)}
                                     >
                                         {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : null}
                                         {saving ? 'Saving...' : 'Save'}
                                     </button>
                                     <button
-                                        onClick={handleSaveVehicleFields}
-                                        disabled={saving}
-                                        className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                                        onClick={() => { saveVehicleTab(); setActiveTab('purchaseCosts'); }}
+                                        disabled={saving || !vehicleTabDirty}
+                                        className={tabSaveButtonClass(vehicleTabDirty, saving)}
                                     >
                                         Save &amp; Next -&gt;
                                     </button>
+                                    {!vehicleTabDirty && <span className="text-[11px] text-slate-400">Edit a field to enable save</span>}
                                 </div>
                             </div>
                         )}
@@ -6215,16 +6417,16 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                         <div className="flex items-center gap-2">
                                                             <button
                                                                 onClick={handleSaveImages}
-                                                                disabled={saving}
-                                                                className="px-5 py-2 bg-[#4D7CFF] text-white rounded text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm flex items-center gap-2"
+                                                                disabled={saving || !imagesTabDirty}
+                                                                className={`px-5 py-2 rounded text-[13px] font-bold transition-all shadow-sm flex items-center gap-2 ${imagesTabDirty && !saving ? 'bg-[#4D7CFF] text-white hover:bg-blue-600' : 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed'}`}
                                                             >
                                                                 {saving ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : null}
                                                                 Save
                                                             </button>
                                                             <button
                                                                 onClick={handleSaveImages}
-                                                                disabled={saving}
-                                                                className="px-5 py-2 bg-[#4D7CFF] text-white rounded text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm"
+                                                                disabled={saving || !imagesTabDirty}
+                                                                className={`px-5 py-2 rounded text-[13px] font-bold transition-all shadow-sm ${imagesTabDirty && !saving ? 'bg-[#4D7CFF] text-white hover:bg-blue-600' : 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed'}`}
                                                             >
                                                                 Save &amp; Next -&gt;
                                                             </button>
@@ -6580,7 +6782,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                 editFeatures={editFeatures}
                                 setEditFeatures={setEditFeatures}
                                 saving={saving}
-                                onSave={handleSaveContent}
+                                onSave={saveOptionsTab}
+                                saveDisabled={!optionsTabDirty}
                                 stockId={vehicle?.stockId}
                                 vehicleMake={textValue(vehicle?.make)}
                                 vehicleFeatures={vehicle?.features || []}
@@ -6608,7 +6811,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                             <HistoryTab
                                 vehicle={vehicle}
                                 saving={saving}
-                                onSave={(updates) => patchVehicle(updates)}
+                                onSave={async (updates) => patchVehicle(updates, true)}
                                 checkData={vehicleCheckData}
                                 onVinFound={(vin, engineNumber) => {
                                     const patch: Record<string, string> = {};
@@ -6654,8 +6857,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                         {/* Big publish toggle */}
                                         <button
-                                            onClick={() => toggleAndSave('atAdvertStatus')}
-                                            disabled={savingChannel === 'atAdvertStatus'}
+                                            onClick={() => toggleChannel('atAdvertStatus')}
+                                            disabled={savingChannel === 'all'}
                                             className={`relative w-14 h-7 rounded-full transition-all duration-300 shadow-inner focus:outline-none disabled:opacity-60 ${
                                                 vehicle.atAdvertStatus === 'PUBLISHED' ? 'bg-emerald-500' : 'bg-slate-200'
                                             }`}
@@ -6759,43 +6962,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                 : <span className="text-amber-600">⚠ Not yet pushed to AutoTrader</span>
                                             }
                                         </div>
-                                        {vehicle.stockId ? (
-                                            <button
-                                                onClick={async () => {
-                                                    if (!vehicle.stockId) return;
-                                                    setSaving(true);
-                                                    try {
-                                                        // Push latest advert text to AT without changing channel statuses
-                                                        const res = await fetch(`/api/vehicles/autotrader-stock/${vehicle.stockId}/advertise`, {
-                                                            method: 'PATCH',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({
-                                                                channels: {
-                                                                    autotrader: vehicle.atAdvertStatus         || 'NOT_PUBLISHED',
-                                                                    advertiser: vehicle.advertiserAdvertStatus  || 'NOT_PUBLISHED',
-                                                                    locator:    vehicle.locatorAdvertStatus     || 'NOT_PUBLISHED',
-                                                                    export:     vehicle.exportAdvertStatus      || 'NOT_PUBLISHED',
-                                                                    profile:    vehicle.profileAdvertStatus     || 'NOT_PUBLISHED',
-                                                                },
-                                                                attentionGrabber: (vehicle.attentionGrabber || '').trim().slice(0, 30) || undefined,
-                                                                description: (vehicle.description || vehicle.description2 || '').trim().slice(0, 4000) || undefined,
-                                                            }),
-                                                        });
-                                                        const d = await res.json();
-                                                        if (!d.ok) throw new Error(d.error || 'Failed');
-                                                    } catch (err: any) {
-                                                        alert(err.message || 'Failed to update advert text');
-                                                    } finally {
-                                                        setSaving(false);
-                                                    }
-                                                }}
-                                                disabled={saving}
-                                                className="flex items-center gap-2 px-5 py-2 rounded-md text-[13px] font-bold bg-slate-700 text-white hover:bg-slate-800 transition-all shadow-sm disabled:opacity-50"
-                                            >
-                                                {saving && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                                Update Advert Text
-                                            </button>
-                                        ) : (
+                                        {vehicle.stockId ? null : (
                                             <button
                                                 onClick={handleCreateAtStock}
                                                 disabled={saving}
@@ -6810,9 +6977,34 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
 
                                 {/* ── Other Advertising Channels ── */}
                                 <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
-                                    <div className="px-6 py-4 border-b border-[#E2E8F0]">
-                                        <h3 className="text-[13px] font-bold text-slate-700">Other Channels</h3>
-                                        <p className="text-[11px] text-slate-400 mt-0.5">Toggle each channel on/off. Click <strong>Save & Publish</strong> above to apply all changes.</p>
+                                    <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-center justify-between gap-4">
+                                        <div>
+                                            <h3 className="text-[13px] font-bold text-slate-700">Other Channels</h3>
+                                            <p className="text-[11px] text-slate-400 mt-0.5">Toggle each channel on/off then click <strong>Save</strong> to apply.</p>
+                                        </div>
+                                        <button
+                                            onClick={saveChannels}
+                                            disabled={!hasPendingChannels || savingChannel === 'all'}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-bold transition-all shadow-sm shrink-0 ${
+                                                hasPendingChannels
+                                                    ? 'bg-[#4D7CFF] text-white hover:bg-blue-600'
+                                                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            {savingChannel === 'all' ? (
+                                                <>
+                                                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                    Saving...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                    Save Changes
+                                                </>
+                                            )}
+                                        </button>
                                     </div>
                                     <div className="divide-y divide-slate-50">
                                         {[
@@ -6838,8 +7030,8 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                             </span>
                                                         )}
                                                         <button
-                                                            onClick={() => toggleAndSave(chan.key)}
-                                                            disabled={savingChannel === chan.key}
+                                                            onClick={() => toggleChannel(chan.key)}
+                                                            disabled={savingChannel === 'all'}
                                                             className={`relative w-11 h-6 rounded-full transition-all duration-300 disabled:opacity-60 ${isLive ? 'bg-[#4D7CFF]' : 'bg-slate-200'}`}
                                                         >
                                                             <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-300 ${isLive ? 'left-6' : 'left-1'}`} />
@@ -7066,7 +7258,7 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                         <div className="text-[12px] text-slate-500">Would you like to create a purchase invoice using the above values?</div>
                                                     </div>
                                                 </div>
-                                                <button onClick={handleSaveVehicleFields} disabled={saving} className="px-5 py-2.5 bg-[#4D7CFF] text-white rounded-lg text-[13px] font-bold hover:bg-blue-600 transition-all shadow-sm whitespace-nowrap">
+                                                <button onClick={savePurchaseTab} disabled={saving || !purchaseTabDirty} className={`px-5 py-2.5 rounded-lg text-[13px] font-bold transition-all shadow-sm whitespace-nowrap ${purchaseTabDirty && !saving ? 'bg-[#4D7CFF] text-white hover:bg-blue-600' : 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed'}`}>
                                                     Create Purchase
                                                 </button>
                                             </div>
@@ -7275,14 +7467,15 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                     </div>
                                     {/* Save / Save & Next */}
-                                    <div className="flex gap-3 pt-2">
-                                        <button onClick={handleSaveVehicleFields} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-3 pt-2">
+                                        <button onClick={savePurchaseTab} disabled={saving || !purchaseTabDirty} className={tabSaveButtonClass(purchaseTabDirty, saving)}>
                                             {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                                             {saving ? 'Saving...' : 'Save'}
                                         </button>
-                                        <button onClick={() => { handleSaveVehicleFields(); setActiveTab('stockPrice'); }} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50">
+                                        <button onClick={() => { savePurchaseTab(); setActiveTab('stockPrice'); }} disabled={saving || !purchaseTabDirty} className={tabSaveButtonClass(purchaseTabDirty, saving)}>
                                             Save &amp; Next -&gt;
                                         </button>
+                                        {!purchaseTabDirty && <span className="text-[11px] text-slate-400">Edit a field to enable save</span>}
                                     </div>
                                 </div>
                             );
@@ -7724,7 +7917,20 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                                     </div>
                                                     <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md overflow-hidden shadow-sm bg-white">
                                                         <span className="px-3 text-slate-400 font-semibold text-[13px] border-r border-[#E2E8F0] py-2">£</span>
-                                                        <input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none" />
+                                                        <input
+                                                            type="number"
+                                                            value={editPrice}
+                                                            onChange={e => {
+                                                                const next = e.target.value;
+                                                                setEditPrice(next);
+                                                                const prevWebsite = Number(vehicle?.price) || 0;
+                                                                const prevSales = Number(editForecourtPrice || vehicle?.forecourtPrice) || 0;
+                                                                if (!editForecourtPrice.trim() || prevSales === prevWebsite) {
+                                                                    setEditForecourtPrice(next);
+                                                                }
+                                                            }}
+                                                            className="flex-1 px-2 py-2 text-[13px] text-slate-800 focus:outline-none"
+                                                        />
                                                     </div>
                                                 </div>
                                                 <div>
@@ -7787,15 +7993,17 @@ export default function VehicleDetailPage({ params }: { params: Promise<{ id: st
                                         </div>
                                     )}
 
-                                    {/* Save / Save & Next */}
-                                    <div className="flex gap-3 pt-2">
-                                        <button onClick={handleSaveVehicleFields} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center gap-2">
+                                    {/* Save / Save & Next — price tab syncs to AutoTrader */}
+                                    <div className="flex flex-wrap items-center gap-3 pt-2">
+                                        <button onClick={saveStockPriceTab} disabled={saving || !stockPriceTabDirty} className={tabSaveButtonClass(stockPriceTabDirty, saving)}>
                                             {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                                             {saving ? 'Saving...' : 'Save'}
                                         </button>
-                                        <button onClick={() => { handleSaveVehicleFields(); setActiveTab('salesChannels'); }} disabled={saving} className="px-6 py-2.5 bg-[#4D7CFF] text-white rounded-md text-[13px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50">
+                                        <button onClick={() => { saveStockPriceTab(); setActiveTab('salesChannels'); }} disabled={saving || !stockPriceTabDirty} className={tabSaveButtonClass(stockPriceTabDirty, saving)}>
                                             Save &amp; Next -&gt;
                                         </button>
+                                        {!stockPriceTabDirty && <span className="text-[11px] text-slate-400">Edit price or stock fields to enable save</span>}
+                                        <span className="text-[11px] text-slate-500 w-full">AutoTrader uses <strong>Sales Channel Price</strong> (blank = website price).</span>
                                     </div>
                                 </div>
                             );

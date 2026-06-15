@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth';
 import { AutoTraderClient } from '@/lib/autotrader';
+import connectToDatabase from '@/lib/db';
+import Vehicle from '@/models/Vehicle';
+import mongoose from 'mongoose';
 
 type Params = { params: Promise<{ dealId: string }> };
 
@@ -49,6 +52,27 @@ export async function GET(req: NextRequest, { params }: Params) {
                 };
             } else {
                 data.partExchange = null;
+            }
+        }
+
+        // Enrich stock with VRM from local Vehicle DB
+        const stockId = data.stock?.stockId;
+        if (stockId) {
+            await connectToDatabase();
+            const vehicle = await Vehicle.findOne(
+                { stockId, tenantId: new mongoose.Types.ObjectId(session.tenantId) },
+                { vrm: 1, make: 1, model: 1, year: 1, mileage: 1, images: 1 }
+            ).lean() as any;
+            if (vehicle) {
+                data.stock = {
+                    ...data.stock,
+                    vrm: vehicle.vrm || data.stock?.vrm,
+                    make: vehicle.make || data.stock?.make,
+                    model: vehicle.model || data.stock?.model,
+                    year: vehicle.year || data.stock?.year,
+                    mileage: vehicle.mileage || data.stock?.mileage,
+                    image: vehicle.images?.[0] || null,
+                };
             }
         }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { AutoTraderClient } from '@/lib/autotrader';
 import { withErrorHandler } from '@/lib/api-handler';
+import { ATCache } from '@/lib/at-cache';
 import connectDB from '@/lib/db';
 import Vehicle from '@/models/Vehicle';
 
@@ -77,11 +78,16 @@ async function updateAdvertisingStatus(req: NextRequest, { params }: { params: P
         if (attentionGrabber) retailAdverts.attentionGrabber = String(attentionGrabber).slice(0, 30);
         if (description)      retailAdverts.description      = String(description).slice(0, 4000);
 
-        const result = await client.patch(
-            `/stock/${stockId}`,
-            { adverts: { retailAdverts } },
-            { advertiserId: client.dealerId! }
-        );
+        const result = await client.updateStock(stockId, { adverts: { retailAdverts } });
+        if (result?.skipped) {
+            return NextResponse.json({
+                ok: true,
+                skipped: true,
+                reason: result.reason || 'no_change',
+                message: 'No changes to send to AutoTrader.',
+            });
+        }
+        ATCache.delete(`stock:${session.tenantId}:${stockId}`);
 
         // Extract actual statuses AT returned (may be CAPPED or REJECTED)
         const atRetailAdverts = result?.adverts?.retailAdverts || {};

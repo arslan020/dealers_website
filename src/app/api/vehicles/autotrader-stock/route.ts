@@ -97,7 +97,9 @@ async function getAutoTraderStock(req: NextRequest) {
                         engineSize: toStr(v.vehicle?.engineSizeCc),
                         bodyType: toStr(v.vehicle?.bodyType),
                         features: v.features || [],
+                        vehicle: v.vehicle || {},
                         technicalSpecs: v.vehicle || {},
+                        media: v.media || {},
                         adverts: v.adverts,
                         // Keep full metadata so dashboard can read lifecycleState & dateOnForecourt from cache
                         metadata: v.metadata || {},
@@ -243,7 +245,8 @@ export async function POST(req: NextRequest) {
         };
 
         const vrm = (vehicle.vrm || vehicle.registration || '').toString().toUpperCase().replace(/\s/g, '');
-        const engineCC = vehicle.engineSize ? parseInt(String(vehicle.engineSize).replace(/\D/g, ''), 10) || undefined : undefined;
+        const engineFloat = vehicle.engineSize ? parseFloat(String(vehicle.engineSize)) : NaN;
+        const engineCC = !isNaN(engineFloat) && engineFloat > 0 ? Math.round(engineFloat * 1000) : undefined;
 
         // Attention grabber: use stored value, fall back to longAttentionGrabber (truncated), or skip
         const rawGrabber = (vehicle.attentionGrabber || '').trim()
@@ -351,7 +354,9 @@ export async function POST(req: NextRequest) {
                 ...(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible') != null && { wheelchairAccessible: Boolean(sp(vehicle.wheelchairAccessible, 'wheelchairAccessible')) }),
                 // Engine — model field wins; technicalSpecs (AT lookup) fills gaps; manualSpecs last resort
                 ...(engineCC                                                         && { engineCapacityCC: engineCC }),
-                ...(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres') != null && { badgeEngineSizeLitres: Number(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres')) }),
+                ...(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres') != null
+                    ? { badgeEngineSizeLitres: Number(sp(vehicle.badgeEngineSizeLitres, 'badgeEngineSizeLitres')) }
+                    : (!isNaN(engineFloat) && engineFloat > 0 ? { badgeEngineSizeLitres: engineFloat } : {})),
                 ...(sp(vehicle.enginePowerBHP,  'enginePowerBHP')  != null && { enginePowerBHP:  Number(sp(vehicle.enginePowerBHP,  'enginePowerBHP')) }),
                 ...(sp(vehicle.enginePowerPS,   'enginePowerPS')   != null && { enginePowerPS:   Number(sp(vehicle.enginePowerPS,   'enginePowerPS')) }),
                 ...(sp(vehicle.engineTorqueNM,  'engineTorqueNM')  != null && { engineTorqueNM:  Number(sp(vehicle.engineTorqueNM,  'engineTorqueNM')) }),

@@ -150,19 +150,17 @@ async function getVehicleCheck(req: NextRequest) {
         const client = new AutoTraderClient(session.tenantId);
         await client.init();
 
-        // Run AT, DVLA, and DVSA MOT History calls in parallel (AT result cached 24hr)
-        const atCacheKey = `vrm:check:${vrm.toUpperCase()}`;
+        // AT data: reuse lookupVehicle cache (combined features+competitors+history+fullVehicleCheck).
+        // Falls back to dedicated check cache (vrm:check:) from prior separate calls.
+        const lookupCacheKey = `vehicle:${client.dealerId}:${vrm.toUpperCase()}`;
+        const checkCacheKey  = `vrm:check:${vrm.toUpperCase()}`;
         const [responseData, dvlaTax, dvsaMotTests] = await Promise.all([
             (async () => {
-                const cached = ATCache.get(atCacheKey);
+                const cached = ATCache.get(lookupCacheKey) || ATCache.get(checkCacheKey);
                 if (cached) return cached;
-                const fresh = await client.get('/vehicles', {
-                    registration: vrm,
-                    advertiserId: client.dealerId || '',
-                    history: 'true',
-                    fullVehicleCheck: 'true',
-                });
-                if (fresh?.vehicle) ATCache.set(atCacheKey, fresh, TTL.VRM_CHECK);
+                // Cache miss — use lookupVehicle (sets lookupCacheKey, includes all params)
+                const fresh = await client.lookupVehicle(vrm);
+                if (fresh?.vehicle) ATCache.set(checkCacheKey, fresh, TTL.VRM_CHECK);
                 return fresh;
             })(),
             fetchDvlaTax(vrm),
@@ -197,6 +195,8 @@ async function getVehicleCheck(req: NextRequest) {
                     registration: vrm,
                     advertiserId: client2.dealerId || '',
                     history: 'true',
+                    features: 'true',
+                    competitors: 'true',
                 }),
                 fetchDvlaTax(vrm),
                 fetchDvsaMotHistory(vrm),

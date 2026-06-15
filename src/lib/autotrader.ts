@@ -1,6 +1,8 @@
 import Tenant from '@/models/Tenant';
+import AutoTraderToken from '@/models/AutoTraderToken';
 import connectToDatabase from './db';
-import { ATCache, TTL } from './at-cache';
+import { ATCache, TTL, getLastAtPayload, setLastAtPayload } from './at-cache';
+import { diffAtBatch, getAtDiffSource, mergeAtPayload } from './at-diff';
 
 /** Production: https://api.autotrader.co.uk — Sandbox: https://api-sandbox.autotrader.co.uk (set AUTOTRADER_API_URL) */
 const AUTOTRADER_BASE_URL = process.env.AUTOTRADER_API_URL || 'https://api.autotrader.co.uk';
@@ -54,12 +56,23 @@ export class AutoTraderClient {
     private async getAccessToken(): Promise<string> {
         if (!this.apiKey || !this.apiSecret) await this.init();
 
-        // Return cached token if still valid (with 60s safety margin)
+        // 1. Module-level cache — fast path for same process/worker
         const cached = tokenCache[this.tenantId];
         if (cached && Date.now() < cached.expiresAt) {
             return cached.token;
         }
 
+        // 2. MongoDB — shared across all processes and serverless instances
+        // Valid if the token won't expire within the next 60 seconds
+        await connectToDatabase();
+        const dbToken = await AutoTraderToken.findOne({ tenantId: this.tenantId }).lean() as any;
+        if (dbToken && new Date(dbToken.expiresAt).getTime() > Date.now() + 60_000) {
+            const expiresAt = new Date(dbToken.expiresAt).getTime() - 60_000;
+            tokenCache[this.tenantId] = { token: dbToken.token, expiresAt };
+            return dbToken.token;
+        }
+
+        // 3. Fetch a new token from AT
         const params = new URLSearchParams();
         params.append('key', this.apiKey as string);
         params.append('secret', this.apiSecret as string);
@@ -78,12 +91,22 @@ export class AutoTraderClient {
         }
 
         const data: AutoTraderTokenResponse = await res.json();
-        // Cache with 60s safety margin before actual expiry
-        const expiresAt = data.expires_at
-            ? new Date(data.expires_at).getTime() - 60_000
-            : Date.now() + 14 * 60 * 1000; // fallback: 14 minutes
+        // AT returns expires_at as ISO string; fall back to 15-minute window
+        const atExpiry = data.expires_at
+            ? new Date(data.expires_at).getTime()
+            : Date.now() + 15 * 60 * 1000;
 
-        tokenCache[this.tenantId] = { token: data.access_token, expiresAt };
+        // Persist to MongoDB so all processes share this token for the full 15-minute window
+        await AutoTraderToken.findOneAndUpdate(
+            { tenantId: this.tenantId },
+            { token: data.access_token, expiresAt: new Date(atExpiry) },
+            { upsert: true }
+        );
+
+        // Update module-level cache with 60s safety margin
+        const localExpiresAt = atExpiry - 60_000;
+        tokenCache[this.tenantId] = { token: data.access_token, expiresAt: localExpiresAt };
+        console.log(`[AutoTrader] New token fetched for tenant ${this.tenantId}, expires ${new Date(atExpiry).toISOString()}`);
         return data.access_token;
     }
 
@@ -119,6 +142,16 @@ export class AutoTraderClient {
                 // Force token refresh on 401
                 delete tokenCache[this.tenantId];
                 throw new Error('RETRY_AUTH');
+            }
+
+            // 202 = stock PATCH with no new change — treat as skip, not an error
+            if (res.status === 202) {
+                const text = await res.text();
+                let body: any = { _atStatus: 202, _atNoChange: true };
+                if (text) {
+                    try { body = { ...JSON.parse(text), _atStatus: 202, _atNoChange: true }; } catch { /* empty 202 body */ }
+                }
+                return body;
             }
 
             if (!res.ok) {
@@ -223,9 +256,9 @@ export class AutoTraderClient {
         return this.post('/valuations', payload, { advertiserId: this.dealerId! });
     }
 
-    /** GET /vehicles?registration={vrm}&advertiserId={dealerId}&features=true&competitors=true — core vehicle lookup.
-     * AT docs: vehicle data, features, competitors and history are all returned in one call.
-     * Cached for 1 hour per VRM to eliminate repeated calls flagged by AT integration team.
+    /** GET /vehicles?registration={vrm}&advertiserId={dealerId}&features=true&competitors=true&history=true&fullVehicleCheck=true
+     * Single combined call returns vehicle data, features, competitors, history and HPI check.
+     * Cached for 1 hour per VRM. All consumers (optional-extras, vehicle-check, competitors) share this cache.
      */
     async lookupVehicle(registration: string) {
         if (!this.dealerId) await this.init();
@@ -240,6 +273,8 @@ export class AutoTraderClient {
             advertiserId: this.dealerId!,
             features: 'true',
             competitors: 'true',
+            history: 'true',
+            fullVehicleCheck: 'true',
         });
         if (result) ATCache.set(cacheKey, result, TTL.VRM_LOOKUP); // 1 hour
         return result;
@@ -410,14 +445,21 @@ export class AutoTraderClient {
 
     // ─── Stock ────────────────────────────────────────────────────────────────────
 
-    /** GET /stock?advertiserId=&stockId= — single stock item. */
+    /** GET /stock?advertiserId=&stockId= — single stock item. Cached 30 s to absorb duplicate page-load calls. */
     async getStockItem(stockId: string) {
         if (!this.dealerId) await this.init();
-        const key = `${this.tenantId}:${stockId}`;
-        if (key in stockItemInflight) return stockItemInflight[key];
+        const cacheKey = `stock:${this.tenantId}:${stockId}`;
+        const cached = ATCache.get(cacheKey);
+        if (cached) return cached;
+        const inflightKey = `${this.tenantId}:${stockId}`;
+        if (inflightKey in stockItemInflight) return stockItemInflight[inflightKey];
         const promise = this.get('/stock', { advertiserId: this.dealerId!, stockId })
-            .finally(() => { delete stockItemInflight[key]; });
-        stockItemInflight[key] = promise;
+            .then((result: any) => {
+                if (result) ATCache.set(cacheKey, result, TTL.STOCK_ITEM);
+                return result;
+            })
+            .finally(() => { delete stockItemInflight[inflightKey]; });
+        stockItemInflight[inflightKey] = promise;
         return promise;
     }
 
@@ -432,11 +474,42 @@ export class AutoTraderClient {
 
     /**
      * PATCH /stock/{stockId}?advertiserId= — update any field of a stock record.
+     * Diffs against last-sent / live AT state first to avoid 202 no-change responses.
      * Capability: Stock Updates | Price Updates | Availability Updates
      */
     async updateStock(stockId: string, updatePayload: Record<string, any>) {
         if (!this.dealerId) await this.init();
-        return this.patch(`/stock/${stockId}`, updatePayload, { advertiserId: this.dealerId! });
+        if (!updatePayload || Object.keys(updatePayload).length === 0) {
+            return { skipped: true, reason: 'empty_payload' };
+        }
+
+        let diffSource = getAtDiffSource(getLastAtPayload(stockId));
+        if (!diffSource) {
+            try {
+                diffSource = getAtDiffSource(await this.getStockItem(stockId));
+            } catch {
+                // If GET fails, still attempt PATCH with caller payload
+            }
+        }
+
+        const diffed = diffAtBatch(updatePayload, diffSource);
+        if (Object.keys(diffed).length === 0) {
+            console.log(`[AutoTrader] Skipped PATCH ${stockId} — payload matches AT (no HTTP call)`);
+            return { skipped: true, reason: 'no_change' };
+        }
+
+        const result = await this.patch(`/stock/${stockId}`, diffed, { advertiserId: this.dealerId! });
+
+        if (result?._atNoChange) {
+            console.log(`[AutoTrader] AT returned 202 for ${stockId} — treating as no-op`);
+            if (diffSource) setLastAtPayload(stockId, mergeAtPayload(diffSource, diffed));
+            return { skipped: true, reason: 'at_202', ...result };
+        }
+
+        const merged = mergeAtPayload(diffSource || {}, diffed);
+        setLastAtPayload(stockId, merged);
+        ATCache.delete(`stock:${this.tenantId}:${stockId}`);
+        return result;
     }
 
     /**
@@ -463,12 +536,7 @@ export class AutoTraderClient {
         stockId: string,
         lifecycleState: 'DUE_IN' | 'FORECOURT' | 'SALE_IN_PROGRESS' | 'SOLD' | 'WASTEBIN' | 'DELETED'
     ) {
-        if (!this.dealerId) await this.init();
-        return this.patch(
-            `/stock/${stockId}`,
-            { metadata: { lifecycleState } },
-            { advertiserId: this.dealerId! }
-        );
+        return this.updateStock(stockId, { metadata: { lifecycleState } });
     }
 
     /**
@@ -496,11 +564,9 @@ export class AutoTraderClient {
         const advertKey = channelKeyMap[channel];
         if (!advertKey) throw new Error(`Invalid channel: ${channel}`);
 
-        return this.patch(
-            `/stock/${stockId}`,
-            { adverts: { retailAdverts: { [advertKey]: { status } } } },
-            { advertiserId: this.dealerId! }
-        );
+        return this.updateStock(stockId, {
+            adverts: { retailAdverts: { [advertKey]: { status } } },
+        });
     }
 
     /**
@@ -530,11 +596,7 @@ export class AutoTraderClient {
             dealerAuctionAdvert: { status: 'NOT_PUBLISHED' }
         };
 
-        return this.patch(
-            `/stock/${stockId}`,
-            { adverts: { retailAdverts, tradeAdverts } },
-            { advertiserId: this.dealerId! }
-        );
+        return this.updateStock(stockId, { adverts: { retailAdverts, tradeAdverts } });
     }
 
     // ─── Stock Extended Queries ───────────────────────────────────────────────────

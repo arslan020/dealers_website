@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withErrorHandler } from '@/lib/api-handler';
 import { AutoTraderClient } from '@/lib/autotrader';
+import { ATCache } from '@/lib/at-cache';
 
 /**
  * GET /api/deals/stock/[stockId]
@@ -26,10 +27,14 @@ async function getDealsByStockId(
     const client = new AutoTraderClient(tenantId);
     await client.init();
 
-    // Fetch all deals and filter by stockId client-side
-    // AT API does not have a direct filter for stockId in the list endpoint
-    const data = await client.getDeals({ pageSize: '50' });
-    const allDeals: any[] = data.results || [];
+    // Cache the full deals list per tenant for 2 minutes — vehicle page loads this on every open
+    const dealsCacheKey = `deals:list:${tenantId}`;
+    let allDeals: any[] = ATCache.get(dealsCacheKey);
+    if (!allDeals) {
+        const data = await client.getDeals({ pageSize: '50' });
+        allDeals = data.results || [];
+        if (allDeals.length > 0) ATCache.set(dealsCacheKey, allDeals, 120);
+    }
 
     const vehicleDeals = allDeals.filter((d: any) => d.stock?.stockId === stockId);
 

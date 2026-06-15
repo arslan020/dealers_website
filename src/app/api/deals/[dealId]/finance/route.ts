@@ -27,8 +27,17 @@ export async function POST(req: NextRequest, { params }: Params) {
         return NextResponse.json({ ok: true, application: result });
     } catch (err: any) {
         console.error('[Finance POST]', err.message, err.data);
-        const msg = err.data ? JSON.stringify(err.data) : err.message;
-        return NextResponse.json({ ok: false, error: msg }, { status: err.status || 500 });
+        const raw = err.data;
+        let msg = err.message || 'Failed to create finance application.';
+        let warning: string | null = null;
+        if (raw && typeof raw === 'object') {
+            if (typeof raw.warning === 'string') warning = raw.warning;
+            else if (typeof raw.message === 'string') msg = raw.message;
+            else if (typeof raw.error === 'string') msg = raw.error;
+        } else if (typeof raw === 'string') {
+            try { const p = JSON.parse(raw); warning = p.warning || null; msg = p.message || p.error || msg; } catch { msg = raw; }
+        }
+        return NextResponse.json({ ok: false, error: msg, warning }, { status: err.status || 500 });
     }
 }
 
